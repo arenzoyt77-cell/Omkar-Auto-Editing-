@@ -1,0 +1,93 @@
+name: Android APK Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build OMKAR Automatic Video Maker APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make gradlew Executable
+        run: chmod +x gradlew
+
+      - name: Verify Android Project Structure
+        run: |
+          echo "Checking essential Android project files..."
+          test -f "settings.gradle.kts" || { echo "ERROR: settings.gradle.kts missing"; exit 1; }
+          test -f "build.gradle.kts" || { echo "ERROR: root build.gradle.kts missing"; exit 1; }
+          test -f "app/build.gradle.kts" || { echo "ERROR: app/build.gradle.kts missing"; exit 1; }
+          test -f "gradlew" || { echo "ERROR: gradlew missing"; exit 1; }
+          echo "Project structure verified successfully."
+
+      - name: Prepare Debug Keystore
+        run: |
+          if [ -f "debug.keystore.base64" ] && [ ! -f "debug.keystore" ]; then
+            echo "Restoring debug.keystore from debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+          if [ ! -f "debug.keystore" ]; then
+            echo "Generating fallback debug keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -f "debug.keystore" || { echo "ERROR: debug.keystore could not be prepared"; exit 1; }
+
+      - name: Prepare Environment File
+        run: |
+          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+            cp .env.example .env
+          elif [ ! -f ".env" ]; then
+            touch .env
+          fi
+
+      - name: Build Debug APK
+        run: ./gradlew clean assembleDebug --stacktrace --no-daemon --console=plain
+
+      - name: Locate and Validate Generated APK
+        run: |
+          echo "Searching for generated debug APK..."
+          APK_PATH=$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: No generated APK found under app/build/outputs/apk!"
+            exit 1
+          fi
+
+          FILE_SIZE=$(wc -c < "$APK_PATH")
+          echo "Found APK at: $APK_PATH (Size: $FILE_SIZE bytes)"
+          if [ "$FILE_SIZE" -le 0 ]; then
+            echo "ERROR: Generated APK is empty (0 bytes)!"
+            exit 1
+          fi
+
+          TARGET_APK="OMKAR-AUTOMATIC-VIDEO-MAKER-debug.apk"
+          cp "$APK_PATH" "$TARGET_APK"
+          echo "Successfully prepared $TARGET_APK for artifact upload."
+          ls -lh "$TARGET_APK"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OMKAR-AUTOMATIC-VIDEO-MAKER-APK
+          path: OMKAR-AUTOMATIC-VIDEO-MAKER-debug.apk
+          if-no-files-found: error
+          retention-days: 30

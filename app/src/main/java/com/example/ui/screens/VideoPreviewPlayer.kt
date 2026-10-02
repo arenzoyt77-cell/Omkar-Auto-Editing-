@@ -59,6 +59,27 @@ fun VideoPreviewPlayer(
     totalDurationMs: Long,
     modifier: Modifier = Modifier
 ) {
+    VideoPreviewPlayer(
+        playbackState = playbackState,
+        totalDurationMs = totalDurationMs,
+        onAttachSurface = { previewEngine.attachSurface(it) },
+        onDetachSurface = { previewEngine.detachSurface() },
+        onTogglePlayPause = { previewEngine.togglePlayPause() },
+        onRestart = { previewEngine.seekTo(0L) },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun VideoPreviewPlayer(
+    playbackState: PlaybackState,
+    totalDurationMs: Long,
+    onAttachSurface: (Surface) -> Unit,
+    onDetachSurface: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onRestart: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val transform = playbackState.transform
 
     Box(
@@ -91,13 +112,13 @@ fun VideoPreviewPlayer(
                     TextureView(ctx).apply {
                         surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                             override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {
-                                previewEngine.attachSurface(Surface(st))
+                                onAttachSurface(Surface(st))
                             }
 
                             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {}
 
                             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                                previewEngine.detachSurface()
+                                onDetachSurface()
                                 return true
                             }
 
@@ -192,7 +213,7 @@ fun VideoPreviewPlayer(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
-                        onClick = { previewEngine.togglePlayPause() },
+                        onClick = onTogglePlayPause,
                         modifier = Modifier
                             .size(36.dp)
                             .testTag("play_pause_button")
@@ -221,7 +242,7 @@ fun VideoPreviewPlayer(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
-                        onClick = { previewEngine.seekTo(0L) },
+                        onClick = onRestart,
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(

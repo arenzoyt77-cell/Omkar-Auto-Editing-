@@ -7,7 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.screens.MainScreen
 import com.example.ui.theme.MyApplicationTheme
-import com.example.ui.viewmodel.VideoMakerViewModel
+import com.example.ui.viewmodel.VideoProcessingViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
-                val viewModel: VideoMakerViewModel = viewModel()
+                val viewModel: VideoProcessingViewModel = viewModel()
                 MainScreen(viewModel = viewModel)
             }
         }

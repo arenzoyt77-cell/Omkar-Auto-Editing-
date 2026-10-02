@@ -88,11 +88,11 @@ import com.example.ui.theme.OmkarGreen
 import com.example.ui.theme.OmkarPurple
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceVariantDark
-import com.example.ui.viewmodel.VideoMakerViewModel
+import com.example.ui.viewmodel.VideoProcessingViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun MainScreen(viewModel: VideoMakerViewModel) {
+fun MainScreen(viewModel: VideoProcessingViewModel) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
