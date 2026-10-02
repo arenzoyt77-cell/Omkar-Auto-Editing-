@@ -1,0 +1,6 @@
+{
+  "name": "OMKAR Video Maker",
+  "description": "Automatic speech-boundary video splitting, cinematic keyframe motion, and MP4 export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
