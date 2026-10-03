@@ -63,6 +63,38 @@ enum class MotionCurve(val displayName: String, val description: String) {
         }
     },
 
+    CUBIC(
+        displayName = "Cubic Easing",
+        description = "Rapid cubic acceleration with polished deceleration"
+    ) {
+        override fun interpolate(t: Float): Float {
+            val clamped = t.coerceIn(0f, 1f)
+            return clamped * clamped * clamped
+        }
+    },
+
+    SMOOTHSTEP(
+        displayName = "Smoothstep",
+        description = "Classic graphics Hermite interpolation"
+    ) {
+        override fun interpolate(t: Float): Float {
+            val clamped = t.coerceIn(0f, 1f)
+            return clamped * clamped * (3f - 2f * clamped)
+        }
+    },
+
+    CUSTOM_BEZIER(
+        displayName = "Custom Bezier",
+        description = "Expressive cubic bezier curve modelled from reference video"
+    ) {
+        override fun interpolate(t: Float): Float {
+            val clamped = t.coerceIn(0f, 1f)
+            // Cubic Bezier approximation with control points (0.25, 0.1, 0.25, 1.0)
+            val u = 1f - clamped
+            return 3f * u * u * clamped * 0.1f + 3f * u * clamped * clamped * 1.0f + clamped * clamped * clamped
+        }
+    },
+
     LINEAR(
         displayName = "Linear",
         description = "Constant speed with zero curve modulation"

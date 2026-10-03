@@ -57,9 +57,10 @@ class VideoPreviewEngine(private val context: Context) {
         currentProject = project
         releasePlayer()
 
+        val uri = project.videoUri ?: return
         try {
             val player = MediaPlayer().apply {
-                setDataSource(context, project.videoUri)
+                setDataSource(context, uri)
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)

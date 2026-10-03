@@ -26,4 +26,8 @@ data class SpeechSegment(
     fun findWordAt(timestampMs: Long): WordTimestamp? {
         return words.firstOrNull { timestampMs in it.startMs..it.endMs }
     }
+
+    fun contains(timestampMs: Long): Boolean {
+        return timestampMs in startMs..endMs
+    }
 }

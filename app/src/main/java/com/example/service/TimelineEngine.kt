@@ -53,7 +53,8 @@ object TimelineEngine {
             splitPoints = updatedSplits,
             speechSegments = project.speechSegments,
             totalDurationMs = project.durationMs,
-            existingClips = project.clips
+            existingClips = project.clips,
+            audioAmplitudes = project.audioAmplitudes
         )
 
         return project.copy(
@@ -95,7 +96,8 @@ object TimelineEngine {
             splitPoints = updatedSplits,
             speechSegments = project.speechSegments,
             totalDurationMs = project.durationMs,
-            existingClips = project.clips
+            existingClips = project.clips,
+            audioAmplitudes = project.audioAmplitudes
         )
 
         return project.copy(
@@ -116,13 +118,61 @@ object TimelineEngine {
             splitPoints = updatedSplits,
             speechSegments = project.speechSegments,
             totalDurationMs = project.durationMs,
-            existingClips = project.clips
+            existingClips = project.clips,
+            audioAmplitudes = project.audioAmplitudes
         )
 
         return project.copy(
             splitPoints = updatedSplits,
             clips = updatedClips
         )
+    }
+
+    /**
+     * Regenerates action-synchronized or reference-based motion across all clips.
+     */
+    fun regenerateMotion(
+        project: VideoProject,
+        mode: com.example.model.MotionMode
+    ): VideoProject {
+        return ActionMotionEngine.applyMotionToProject(project, mode)
+    }
+
+    /**
+     * Adds an intermediate keyframe at the playhead position within a clip.
+     */
+    fun addIntermediateKeyframe(
+        project: VideoProject,
+        clipId: String,
+        timestampMs: Long,
+        scale: Float = 1.15f,
+        positionX: Float = 0f,
+        positionY: Float = 0f,
+        rotation: Float = 0f,
+        easing: MotionCurve = MotionCurve.DYNAMIC_PUNCH
+    ): VideoProject {
+        val updatedClips = project.clips.map { clip ->
+            if (clip.id == clipId) {
+                KeyframeEngine.addIntermediateKeyframe(clip, timestampMs, scale, positionX, positionY, rotation, easing)
+            } else clip
+        }
+        return project.copy(clips = updatedClips)
+    }
+
+    /**
+     * Deletes an intermediate keyframe.
+     */
+    fun deleteKeyframe(
+        project: VideoProject,
+        clipId: String,
+        keyframeId: String
+    ): VideoProject {
+        val updatedClips = project.clips.map { clip ->
+            if (clip.id == clipId) {
+                KeyframeEngine.removeIntermediateKeyframe(clip, keyframeId)
+            } else clip
+        }
+        return project.copy(clips = updatedClips)
     }
 
     /**

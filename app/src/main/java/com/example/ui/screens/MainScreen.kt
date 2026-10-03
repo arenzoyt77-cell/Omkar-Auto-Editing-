@@ -461,7 +461,18 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
         isComplete = uiState.isExportComplete,
         onCancel = { viewModel.cancelExport() },
         onPlay = {
-            uiState.exportedUri?.let { uri ->
+            val file = uiState.exportedFile
+            val safeUri = if (file != null && file.exists()) {
+                try {
+                    FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+                } catch (_: Exception) {
+                    uiState.exportedUri
+                }
+            } else {
+                uiState.exportedUri
+            }
+
+            safeUri?.let { uri ->
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, "video/mp4")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -470,7 +481,18 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
             }
         },
         onShare = {
-            uiState.exportedUri?.let { uri ->
+            val file = uiState.exportedFile
+            val safeUri = if (file != null && file.exists()) {
+                try {
+                    FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+                } catch (_: Exception) {
+                    uiState.exportedUri
+                }
+            } else {
+                uiState.exportedUri
+            }
+
+            safeUri?.let { uri ->
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "video/mp4"
                     putExtra(Intent.EXTRA_STREAM, uri)

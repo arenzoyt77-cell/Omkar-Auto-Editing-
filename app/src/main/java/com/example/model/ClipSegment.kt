@@ -8,10 +8,12 @@ enum class MotionPreset(
     val endScale: Float,
     val defaultCurve: MotionCurve
 ) {
+    REFERENCE_MOTION("Reference Motion", 1.00f, 1.26f, MotionCurve.DYNAMIC_PUNCH),
+    AUTO_ACTION("Auto Motion", 1.00f, 1.20f, MotionCurve.CUSTOM_BEZIER),
     CINEMATIC_PUSH_IN("Cinematic Push-In", 1.00f, 1.12f, MotionCurve.CINEMATIC_SLOW),
     GENTLE_PULL_OUT("Gentle Pull-Out", 1.12f, 1.00f, MotionCurve.EASE_IN_OUT),
     SUBTLE_ZOOM_IN("Subtle Zoom In", 1.00f, 1.06f, MotionCurve.EASE_IN_OUT),
-    DYNAMIC_PUNCH("Dynamic Punch", 1.00f, 1.18f, MotionCurve.DYNAMIC_PUNCH),
+    DYNAMIC_PUNCH("Dynamic Punch", 1.00f, 1.22f, MotionCurve.DYNAMIC_PUNCH),
     STATIC("Static Frame", 1.00f, 1.00f, MotionCurve.LINEAR),
     CUSTOM("Custom Keyframes", 1.00f, 1.10f, MotionCurve.EASE_IN_OUT)
 }

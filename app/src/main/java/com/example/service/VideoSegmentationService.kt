@@ -1,9 +1,11 @@
 package com.example.service
 
 import com.example.model.ClipSegment
+import com.example.model.MotionMode
 import com.example.model.MotionPreset
 import com.example.model.SpeechSegment
 import com.example.model.SplitPoint
+import com.example.model.VideoProject
 import java.util.UUID
 import kotlin.math.roundToLong
 
@@ -11,12 +13,15 @@ class VideoSegmentationService {
 
     /**
      * Segments video based on speech-to-text semantic thought boundaries,
-     * ensuring splits align to exact video frame boundaries without cutting spoken words.
+     * snaps splits to discrete video frames, and synthesizes action-synchronized
+     * multi-keyframe motion based on the authoritative reference blueprint.
      */
     fun generateSegmentation(
         speechSegments: List<SpeechSegment>,
         totalDurationMs: Long,
-        frameRate: Float = 30.0f
+        frameRate: Float = 30.0f,
+        audioAmplitudes: List<Float> = emptyList(),
+        motionMode: MotionMode = MotionMode.AUTO_MOTION
     ): Pair<List<SplitPoint>, List<ClipSegment>> {
         val frameDurationMs = if (frameRate > 0) 1000.0 / frameRate else 33.333
 
@@ -39,21 +44,17 @@ class VideoSegmentationService {
         val validatedSplitTimestamps = mutableListOf<Long>()
 
         for (candidate in rawSplitCandidates) {
-            // Check if candidate collides with any spoken word
             var adjustedTime = candidate
             for (word in allWords) {
                 if (adjustedTime in word.startMs..word.endMs) {
-                    // Snap cleanly to after the word finishes
                     adjustedTime = word.endMs + 10L
                     break
                 }
             }
 
-            // Snap to nearest discrete video frame
             val frameIndex = (adjustedTime / frameDurationMs).roundToLong()
             val snappedTime = (frameIndex * frameDurationMs).roundToLong().coerceIn(100L, totalDurationMs - 100L)
 
-            // Prevent split points too close together (< 1.5 seconds)
             val isTooClose = validatedSplitTimestamps.any { kotlin.math.abs(it - snappedTime) < 1500L }
             if (!isTooClose) {
                 validatedSplitTimestamps.add(snappedTime)
@@ -68,14 +69,14 @@ class VideoSegmentationService {
             SplitPoint(
                 id = UUID.randomUUID().toString(),
                 timestampMs = ts,
-                reason = "Spoken Thought Boundary #$index",
+                reason = "Spoken Thought Boundary #${index + 1}",
                 isAutomatic = true,
                 frameIndex = frameIdx
             )
         }
 
-        // Step 4: Build gapless, non-overlapping ClipSegments
-        val clips = mutableListOf<ClipSegment>()
+        // Step 4: Build initial non-overlapping ClipSegments
+        val initialClips = mutableListOf<ClipSegment>()
         val boundaries = mutableListOf<Long>()
         boundaries.add(0L)
         boundaries.addAll(validatedSplitTimestamps)
@@ -86,20 +87,18 @@ class VideoSegmentationService {
             val end = boundaries[i + 1]
             if (end <= start) continue
 
-            // Associate speech text within this clip range
             val matchingSpeech = speechSegments
                 .filter { it.startMs < end && it.endMs > start }
                 .joinToString(" ") { it.text }
 
-            val preset = if (i % 2 == 0) MotionPreset.CINEMATIC_PUSH_IN else MotionPreset.GENTLE_PULL_OUT
             val (startKf, endKf) = KeyframeEngine.createDefaultKeyframesForClip(
                 clipIndex = i,
                 startMs = start,
                 endMs = end,
-                preset = preset
+                preset = MotionPreset.AUTO_ACTION
             )
 
-            clips.add(
+            initialClips.add(
                 ClipSegment(
                     id = UUID.randomUUID().toString(),
                     index = i + 1,
@@ -108,22 +107,35 @@ class VideoSegmentationService {
                     speechText = matchingSpeech.ifEmpty { "Clip ${i + 1}" },
                     startKeyframe = startKf,
                     endKeyframe = endKf,
-                    motionPreset = preset
+                    motionPreset = MotionPreset.AUTO_ACTION
                 )
             )
         }
 
-        return Pair(splitPoints, clips)
+        // Step 5: Synthesize rich, multi-keyframe motion using ActionMotionEngine
+        val dummyProject = VideoProject(
+            durationMs = totalDurationMs,
+            speechSegments = speechSegments,
+            splitPoints = splitPoints,
+            clips = initialClips,
+            audioAmplitudes = audioAmplitudes
+        )
+
+        val motionAppliedProject = ActionMotionEngine.applyMotionToProject(dummyProject, motionMode)
+
+        return Pair(splitPoints, motionAppliedProject.clips)
     }
 
     /**
-     * Rebuilds clips from an updated list of split points (e.g. after user adds, moves, or deletes a split).
+     * Rebuilds clips from an updated list of split points while maintaining motion styling.
      */
     fun rebuildClipsFromSplits(
         splitPoints: List<SplitPoint>,
         speechSegments: List<SpeechSegment>,
         totalDurationMs: Long,
-        existingClips: List<ClipSegment> = emptyList()
+        existingClips: List<ClipSegment> = emptyList(),
+        audioAmplitudes: List<Float> = emptyList(),
+        motionMode: MotionMode = MotionMode.AUTO_MOTION
     ): List<ClipSegment> {
         val sortedSplits = splitPoints.map { it.timestampMs }.sorted()
         val boundaries = mutableListOf<Long>()
@@ -143,8 +155,7 @@ class VideoSegmentationService {
                 .joinToString(" ") { it.text }
 
             val existingMatch = existingClips.getOrNull(i)
-            val preset = existingMatch?.motionPreset
-                ?: if (i % 2 == 0) MotionPreset.CINEMATIC_PUSH_IN else MotionPreset.GENTLE_PULL_OUT
+            val preset = existingMatch?.motionPreset ?: MotionPreset.AUTO_ACTION
 
             val (startKf, endKf) = KeyframeEngine.createDefaultKeyframesForClip(
                 clipIndex = i,
@@ -160,13 +171,22 @@ class VideoSegmentationService {
                     startMs = start,
                     endMs = end,
                     speechText = matchingSpeech.ifEmpty { "Clip ${i + 1}" },
-                    startKeyframe = startKf,
-                    endKeyframe = endKf,
+                    startKeyframe = existingMatch?.startKeyframe ?: startKf,
+                    endKeyframe = existingMatch?.endKeyframe ?: endKf,
+                    intermediateKeyframes = existingMatch?.intermediateKeyframes ?: emptyList(),
                     motionPreset = preset
                 )
             )
         }
 
-        return newClips
+        val dummyProject = VideoProject(
+            durationMs = totalDurationMs,
+            speechSegments = speechSegments,
+            splitPoints = splitPoints,
+            clips = newClips,
+            audioAmplitudes = audioAmplitudes
+        )
+
+        return ActionMotionEngine.applyMotionToProject(dummyProject, motionMode).clips
     }
 }

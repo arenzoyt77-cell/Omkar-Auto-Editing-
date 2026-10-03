@@ -10,7 +10,7 @@ import java.util.UUID
  */
 data class VideoProject(
     val id: String = UUID.randomUUID().toString(),
-    val videoUri: Uri,
+    val videoUri: Uri? = null,
     val localFilePath: String? = null,
     val title: String = "Untitled Project",
     val durationMs: Long = 0L,

@@ -70,6 +70,8 @@ data class VideoProcessingUiState(
     val showTextOverlayDialog: Boolean = false,
     val errorMessage: String? = null,
     val currentMode: EditorMode = EditorMode.SMART,
+    val currentMotionMode: com.example.model.MotionMode = com.example.model.MotionMode.AUTO_MOTION,
+    val motionBlueprintSummary: com.example.model.BlueprintDebugSummary = com.example.model.AuthoritativeReferenceBlueprint.debugSummary,
     val showExportDialog: Boolean = false,
     val isPlayerReady: Boolean = false,
     val canUndo: Boolean = false,
@@ -314,6 +316,7 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
      */
     fun analyzeCurrentVideo() {
         val currentProj = _uiState.value.project ?: return
+        val uri = currentProj.videoUri ?: return
         viewModelScope.launch {
             try {
                 _uiState.value = _uiState.value.copy(
@@ -324,7 +327,7 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                 )
 
                 val audioResult = speechService.analyzeVideo(
-                    videoUri = currentProj.videoUri,
+                    videoUri = uri,
                     durationMs = currentProj.durationMs
                 ) { progress, status ->
                     _uiState.value = _uiState.value.copy(
@@ -341,7 +344,9 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                 val (splits, clips) = segmentationService.generateSegmentation(
                     speechSegments = audioResult.speechSegments,
                     totalDurationMs = currentProj.durationMs,
-                    frameRate = currentProj.frameRate
+                    frameRate = currentProj.frameRate,
+                    audioAmplitudes = audioResult.amplitudes,
+                    motionMode = _uiState.value.currentMotionMode
                 )
 
                 val updatedProject = currentProj.copy(
@@ -584,6 +589,68 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
         val project = _uiState.value.project ?: return
         saveStateForUndo()
         val updated = TimelineEngine.setClipPreset(project, clipId, preset)
+        _uiState.value = _uiState.value.copy(project = updated)
+        updateCurrentTimelineState(exoPlayer.currentPosition)
+    }
+
+    /**
+     * Changes the overall motion mode (REFERENCE MOTION, AUTO MOTION, CUSTOM MOTION)
+     * and re-applies motion curves across clips.
+     */
+    fun setMotionMode(mode: com.example.model.MotionMode) {
+        saveStateForUndo()
+        _uiState.value = _uiState.value.copy(currentMotionMode = mode)
+        val proj = _uiState.value.project ?: return
+        val updated = TimelineEngine.regenerateMotion(proj, mode)
+        _uiState.value = _uiState.value.copy(project = updated)
+        updateCurrentTimelineState(exoPlayer.currentPosition)
+    }
+
+    /**
+     * Regenerates motion curves across clips while preserving the original video and cuts.
+     */
+    fun regenerateMotion() {
+        val proj = _uiState.value.project ?: return
+        saveStateForUndo()
+        val updated = TimelineEngine.regenerateMotion(proj, _uiState.value.currentMotionMode)
+        _uiState.value = _uiState.value.copy(project = updated)
+        updateCurrentTimelineState(exoPlayer.currentPosition)
+    }
+
+    /**
+     * Adds an intermediate keyframe at current playhead position in the selected clip.
+     */
+    fun addKeyframeAtPlayhead(
+        clipId: String,
+        scale: Float = 1.15f,
+        posX: Float = 0f,
+        posY: Float = 0f,
+        curve: MotionCurve = MotionCurve.DYNAMIC_PUNCH
+    ) {
+        val proj = _uiState.value.project ?: return
+        saveStateForUndo()
+        val currentPlayhead = exoPlayer.currentPosition
+        val updated = TimelineEngine.addIntermediateKeyframe(
+            project = proj,
+            clipId = clipId,
+            timestampMs = currentPlayhead,
+            scale = scale,
+            positionX = posX,
+            positionY = posY,
+            rotation = 0f,
+            easing = curve
+        )
+        _uiState.value = _uiState.value.copy(project = updated)
+        updateCurrentTimelineState(currentPlayhead)
+    }
+
+    /**
+     * Deletes a keyframe from the specified clip.
+     */
+    fun deleteKeyframe(clipId: String, keyframeId: String) {
+        val proj = _uiState.value.project ?: return
+        saveStateForUndo()
+        val updated = TimelineEngine.deleteKeyframe(proj, clipId, keyframeId)
         _uiState.value = _uiState.value.copy(project = updated)
         updateCurrentTimelineState(exoPlayer.currentPosition)
     }

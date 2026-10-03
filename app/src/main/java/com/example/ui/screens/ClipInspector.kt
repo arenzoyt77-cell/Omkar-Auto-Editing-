@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,18 +18,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Animation
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -47,10 +55,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.ClipSegment
+import com.example.model.Keyframe
 import com.example.model.MotionCurve
+import com.example.model.MotionMode
 import com.example.model.MotionPreset
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.BorderDark
+import com.example.ui.theme.OmkarCutRed
 import com.example.ui.theme.OmkarCyan
 import com.example.ui.theme.OmkarGold
 import com.example.ui.theme.OmkarPurple
@@ -64,7 +75,12 @@ fun ClipInspector(
     onDismiss: () -> Unit,
     onApplyPreset: (MotionPreset) -> Unit,
     onUpdateKeyframe: (keyframeId: String, scale: Float?, posX: Float?, posY: Float?, rot: Float?, curve: MotionCurve?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentMotionMode: MotionMode = MotionMode.AUTO_MOTION,
+    onSelectMotionMode: ((MotionMode) -> Unit)? = null,
+    onRegenerateMotion: (() -> Unit)? = null,
+    onAddKeyframeAtPlayhead: (() -> Unit)? = null,
+    onDeleteKeyframe: ((String) -> Unit)? = null
 ) {
     Card(
         modifier = modifier
@@ -90,15 +106,89 @@ fun ClipInspector(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Clip #${clip.index} Keyframe Inspector",
+                        text = "Clip #${clip.index} Motion Engine",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         color = Color.White
                     )
                 }
 
                 IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Motion Mode Selector (REFERENCE MOTION, AUTO MOTION, CUSTOM MOTION)
+            if (onSelectMotionMode != null) {
+                Text(
+                    text = "Motion Mode",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = OmkarGold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MotionMode.values().forEach { mode ->
+                        val isSelected = currentMotionMode == mode
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { onSelectMotionMode(mode) },
+                            label = { Text(text = mode.displayName, fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = OmkarGold,
+                                selectedLabelColor = Color.Black
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Regenerate Motion & Add Keyframe Action Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (onRegenerateMotion != null) {
+                    ElevatedButton(
+                        onClick = onRegenerateMotion,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.elevatedButtonColors(
+                            containerColor = SurfaceVariantDark,
+                            contentColor = OmkarGold
+                        ),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Regenerate Motion", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (onAddKeyframeAtPlayhead != null) {
+                    ElevatedButton(
+                        onClick = onAddKeyframeAtPlayhead,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.elevatedButtonColors(
+                            containerColor = SurfaceVariantDark,
+                            contentColor = OmkarCyan
+                        ),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Add Keyframe", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
@@ -111,26 +201,26 @@ fun ClipInspector(
                 color = SurfaceVariantDark
             ) {
                 Row(
-                    modifier = Modifier.padding(10.dp),
+                    modifier = Modifier.padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.RecordVoiceOver,
                         contentDescription = null,
                         tint = OmkarPurple,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "Detected Spoken Thought (${(clip.durationMs / 1000f)}s)",
-                            fontSize = 11.sp,
+                            text = "Detected Speech (${(clip.durationMs / 1000f)}s) • ${clip.allKeyframes().size} Keyframes",
+                            fontSize = 10.sp,
                             color = OmkarPurple,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = clip.speechText.ifBlank { "Thought boundary detected naturally." },
-                            fontSize = 12.sp,
+                            text = clip.speechText.ifBlank { "Action sequence detected." },
+                            fontSize = 11.sp,
                             color = Color.White
                         )
                     }
@@ -142,15 +232,15 @@ fun ClipInspector(
             // Motion Preset selector
             Text(
                 text = "Cinematic Motion Presets",
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = OmkarGold
             )
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 MotionPreset.values().forEach { preset ->
@@ -158,9 +248,9 @@ fun ClipInspector(
                     FilterChip(
                         selected = isSelected,
                         onClick = { onApplyPreset(preset) },
-                        label = { Text(text = preset.displayName, fontSize = 11.sp) },
+                        label = { Text(text = preset.displayName, fontSize = 10.sp) },
                         leadingIcon = if (isSelected) {
-                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(12.dp)) }
                         } else null,
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = OmkarGold,
@@ -172,112 +262,151 @@ fun ClipInspector(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Start Keyframe Control
-            Text(
-                text = "Start Keyframe Zoom: ${(clip.startKeyframe.scale * 100).toInt()}% • Pos X: ${clip.startKeyframe.positionX.toInt()}% • Y: ${clip.startKeyframe.positionY.toInt()}%",
-                fontSize = 12.sp,
-                color = Color.LightGray
-            )
-            Slider(
-                value = clip.startKeyframe.scale,
-                onValueChange = { newScale ->
-                    onUpdateKeyframe(clip.startKeyframe.id, newScale, null, null, null, null)
-                },
-                valueRange = 1.0f..1.60f,
-                colors = SliderDefaults.colors(
-                    thumbColor = OmkarGold,
-                    activeTrackColor = OmkarGold
-                )
-            )
+            // --- Multi-Keyframe Inspector Controls ---
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Start X", fontSize = 10.sp, color = Color.Gray)
-                    Slider(
-                        value = clip.startKeyframe.positionX,
-                        onValueChange = { onUpdateKeyframe(clip.startKeyframe.id, null, it, null, null, null) },
-                        valueRange = -30f..30f,
-                        colors = SliderDefaults.colors(thumbColor = OmkarGold, activeTrackColor = OmkarGold)
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Start Y", fontSize = 10.sp, color = Color.Gray)
-                    Slider(
-                        value = clip.startKeyframe.positionY,
-                        onValueChange = { onUpdateKeyframe(clip.startKeyframe.id, null, null, it, null, null) },
-                        valueRange = -30f..30f,
-                        colors = SliderDefaults.colors(thumbColor = OmkarGold, activeTrackColor = OmkarGold)
-                    )
-                }
-            }
+            // 1. Start Keyframe Control
+            KeyframeControlItem(
+                title = "Start Keyframe (${clip.startMs / 1000f}s)",
+                keyframe = clip.startKeyframe,
+                color = OmkarGold,
+                onUpdate = onUpdateKeyframe
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // End Keyframe Control
-            Text(
-                text = "End Keyframe Zoom: ${(clip.endKeyframe.scale * 100).toInt()}% • Pos X: ${clip.endKeyframe.positionX.toInt()}% • Y: ${clip.endKeyframe.positionY.toInt()}%",
-                fontSize = 12.sp,
-                color = Color.LightGray
-            )
-            Slider(
-                value = clip.endKeyframe.scale,
-                onValueChange = { newScale ->
-                    onUpdateKeyframe(clip.endKeyframe.id, newScale, null, null, null, null)
-                },
-                valueRange = 1.0f..1.60f,
-                colors = SliderDefaults.colors(
-                    thumbColor = OmkarCyan,
-                    activeTrackColor = OmkarCyan
+            // 2. Intermediate Keyframes (if any exist)
+            clip.intermediateKeyframes.forEachIndexed { idx, intermediate ->
+                KeyframeControlItem(
+                    title = "Keyframe #${idx + 2} (${intermediate.timestampMs / 1000f}s)",
+                    keyframe = intermediate,
+                    color = OmkarPurple,
+                    onUpdate = onUpdateKeyframe,
+                    onDelete = onDeleteKeyframe
                 )
-            )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "End X", fontSize = 10.sp, color = Color.Gray)
-                    Slider(
-                        value = clip.endKeyframe.positionX,
-                        onValueChange = { onUpdateKeyframe(clip.endKeyframe.id, null, it, null, null, null) },
-                        valueRange = -30f..30f,
-                        colors = SliderDefaults.colors(thumbColor = OmkarCyan, activeTrackColor = OmkarCyan)
+            // 3. End Keyframe Control
+            KeyframeControlItem(
+                title = "End Keyframe (${clip.endMs / 1000f}s)",
+                keyframe = clip.endKeyframe,
+                color = OmkarCyan,
+                onUpdate = onUpdateKeyframe
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun KeyframeControlItem(
+    title: String,
+    keyframe: Keyframe,
+    color: Color,
+    onUpdate: (keyframeId: String, scale: Float?, posX: Float?, posY: Float?, rot: Float?, curve: MotionCurve?) -> Unit,
+    onDelete: ((String) -> Unit)? = null
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = SurfaceVariantDark
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Diamond,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = title,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                 }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${(keyframe.scale * 100).toInt()}% • X:${keyframe.positionX.toInt()}% Y:${keyframe.positionY.toInt()}%",
+                        fontSize = 10.sp,
+                        color = color,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (onDelete != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(onClick = { onDelete(keyframe.id) }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Keyframe", tint = OmkarCutRed, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+
+            // Scale Slider
+            Text(text = "Zoom Scale: ${(keyframe.scale * 100).toInt()}%", fontSize = 10.sp, color = Color.Gray)
+            Slider(
+                value = keyframe.scale,
+                onValueChange = { onUpdate(keyframe.id, it, null, null, null, null) },
+                valueRange = 1.0f..1.50f,
+                colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color),
+                modifier = Modifier.height(26.dp)
+            )
+
+            // Position X & Y Sliders
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "End Y", fontSize = 10.sp, color = Color.Gray)
+                    Text(text = "Position X: ${keyframe.positionX.toInt()}%", fontSize = 9.sp, color = Color.Gray)
                     Slider(
-                        value = clip.endKeyframe.positionY,
-                        onValueChange = { onUpdateKeyframe(clip.endKeyframe.id, null, null, it, null, null) },
+                        value = keyframe.positionX,
+                        onValueChange = { onUpdate(keyframe.id, null, it, null, null, null) },
                         valueRange = -30f..30f,
-                        colors = SliderDefaults.colors(thumbColor = OmkarCyan, activeTrackColor = OmkarCyan)
+                        colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color),
+                        modifier = Modifier.height(24.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Position Y: ${keyframe.positionY.toInt()}%", fontSize = 9.sp, color = Color.Gray)
+                    Slider(
+                        value = keyframe.positionY,
+                        onValueChange = { onUpdate(keyframe.id, null, null, it, null, null) },
+                        valueRange = -30f..30f,
+                        colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color),
+                        modifier = Modifier.height(24.dp)
                     )
                 }
             }
 
-            // Motion Easing Curve Selector
+            // Easing Curve Selector
             Text(
-                text = "Interpolation Curve: ${clip.startKeyframe.easing.displayName}",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
+                text = "Curve: ${keyframe.easing.displayName}",
+                fontSize = 10.sp,
+                color = Color.LightGray,
+                fontWeight = FontWeight.SemiBold
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 MotionCurve.values().forEach { curve ->
-                    val isSelected = clip.startKeyframe.easing == curve
+                    val isSelected = keyframe.easing == curve
                     FilterChip(
                         selected = isSelected,
-                        onClick = {
-                            onUpdateKeyframe(clip.startKeyframe.id, null, null, null, null, curve)
-                            onUpdateKeyframe(clip.endKeyframe.id, null, null, null, null, curve)
-                        },
-                        label = { Text(text = curve.displayName, fontSize = 10.sp) },
+                        onClick = { onUpdate(keyframe.id, null, null, null, null, curve) },
+                        label = { Text(text = curve.displayName, fontSize = 9.sp) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = OmkarPurple,
-                            selectedLabelColor = Color.White
+                            selectedContainerColor = color.copy(alpha = 0.8f),
+                            selectedLabelColor = Color.Black
                         )
                     )
                 }

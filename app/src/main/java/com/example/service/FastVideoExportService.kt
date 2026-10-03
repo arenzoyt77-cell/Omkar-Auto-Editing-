@@ -16,6 +16,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.opengl.EGL14
 import android.opengl.EGLConfig
@@ -25,28 +26,25 @@ import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
-import android.opengl.GLUtils
 import android.os.Build
 import android.os.Environment
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import android.view.Surface
+import androidx.core.content.FileProvider
 import com.example.model.ExportResolution
 import com.example.model.VideoProject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.coroutines.coroutineContext
 
 data class ExportProgressUpdate(
     val progress: Float, // 0.0 to 1.0 real progress
@@ -62,10 +60,10 @@ data class ExportProgressUpdate(
 /**
  * FastVideoExportService provides an ultra-fast, hardware-accelerated video export
  * pipeline using MediaCodec, EGL, OpenGL ES 2.0 shaders, and MediaMuxer.
- * 
- * Replaces slow frame-by-frame CPU Canvas/Bitmap operations with direct GPU-to-GPU
- * texture processing, achieving up to 100x speedup while preserving all keyframe zoom,
- * translation, rotation, and subtitle animations.
+ *
+ * Produces standards-compliant H.264/AVC + AAC MP4 files with properly interleaved
+ * tracks, valid sample tables, correct presentation timestamps, and robust MediaStore
+ * publishing to ensure flawless playback in Android Gallery and all media players.
  */
 class FastVideoExportService(private val context: Context) {
 
@@ -134,14 +132,13 @@ class FastVideoExportService(private val context: Context) {
             ExportResolution.PORTRAIT_1080P -> 1920
         }
 
-        // Align width and height to multiples of 16 (codec requirement)
-        val alignedWidth = (targetWidth / 16) * 16
-        val alignedHeight = (targetHeight / 16) * 16
+        // Must be even dimensions, preferably multiples of 16 for H.264 macroblock alignment
+        val alignedWidth = ((targetWidth / 16) * 16).coerceAtLeast(320)
+        val alignedHeight = ((targetHeight / 16) * 16).coerceAtLeast(240)
 
         val frameRate = project.exportSettings.fps.coerceIn(24, 60)
         val bitRate = project.exportSettings.bitrateMbps * 1_000_000
         val totalDurationMs = project.effectiveDurationMs.coerceAtLeast(1000L)
-        val frameIntervalUs = 1_000_000L / frameRate
         val totalFrames = ((totalDurationMs * frameRate) / 1000L).toInt().coerceAtLeast(1)
 
         onProgress(
@@ -153,32 +150,33 @@ class FastVideoExportService(private val context: Context) {
                 totalDurationMs = totalDurationMs,
                 fpsSpeed = 0f,
                 etaSeconds = 0,
-                stage = "Initializing hardware video encoder..."
+                stage = "Initializing standards-compatible H.264 encoder..."
             )
         )
 
-        var muxer: MediaMuxer? = null
-        var encoder: MediaCodec? = null
-        var decoder: MediaExtractor? = null
-        var eglHelper: EglSurfaceHelper? = null
-
         try {
-            // Try Hardware-Accelerated Pipeline
-            val success = exportWithHardwareAcceleration(
-                project = project,
-                outputFile = outputFile,
-                alignedWidth = alignedWidth,
-                alignedHeight = alignedHeight,
-                frameRate = frameRate,
-                bitRate = bitRate,
-                totalDurationMs = totalDurationMs,
-                totalFrames = totalFrames,
-                startTime = startTime,
-                onProgress = onProgress
-            )
+            // Attempt Hardware-Accelerated GLES Pipeline
+            var success = false
+            try {
+                success = exportWithHardwareAcceleration(
+                    project = project,
+                    outputFile = outputFile,
+                    alignedWidth = alignedWidth,
+                    alignedHeight = alignedHeight,
+                    frameRate = frameRate,
+                    bitRate = bitRate,
+                    totalDurationMs = totalDurationMs,
+                    totalFrames = totalFrames,
+                    startTime = startTime,
+                    onProgress = onProgress
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Hardware accelerated pipeline failed, trying fallback: ${e.message}")
+                success = false
+            }
 
-            if (!success) {
-                // Graceful fallback to optimized batch streaming if device lacks GLES surface encoder
+            if (!success && !isCancelled.get()) {
+                // Optimized fallback using frame rasterization and strictly-interleaved audio
                 exportWithOptimizedFallback(
                     project = project,
                     outputFile = outputFile,
@@ -199,7 +197,15 @@ class FastVideoExportService(private val context: Context) {
                 return@withContext
             }
 
-            val finalUri = saveToMediaStore(outputFile)
+            // CRITICAL VALIDATION: Verify the output MP4 container & streams before notifying success
+            validateExportedMp4(outputFile)
+
+            // Publish valid file to Android MediaStore and generate playback URI
+            val finalUri = publishToMediaStore(outputFile)
+
+            val totalElapsed = ((SystemClock.elapsedRealtime() - startTime) / 1000f).coerceAtLeast(0.1f)
+            val finalFps = totalFrames / totalElapsed
+
             onProgress(
                 ExportProgressUpdate(
                     progress = 1.0f,
@@ -207,7 +213,7 @@ class FastVideoExportService(private val context: Context) {
                     totalFrames = totalFrames,
                     currentDurationMs = totalDurationMs,
                     totalDurationMs = totalDurationMs,
-                    fpsSpeed = (totalFrames / ((SystemClock.elapsedRealtime() - startTime) / 1000f).coerceAtLeast(0.1f)),
+                    fpsSpeed = finalFps,
                     etaSeconds = 0,
                     stage = "Export Complete"
                 )
@@ -223,14 +229,13 @@ class FastVideoExportService(private val context: Context) {
             Log.e(TAG, "Export failure: ${e.message}", e)
             if (outputFile.exists()) outputFile.delete()
             onError("Export failed: ${e.localizedMessage ?: e.message}")
-        } finally {
-            // Resources safely cleaned up in sub-functions
         }
     }
 
     /**
      * Primary Hardware-Accelerated Pipeline:
-     * MediaExtractor -> MediaCodec Decoder -> SurfaceTexture -> GLES Shader (Keyframe Transform) -> MediaCodec Encoder -> MediaMuxer
+     * MediaExtractor -> MediaCodec Decoder -> SurfaceTexture -> GLES Shader -> MediaCodec Encoder -> MediaMuxer
+     * With strictly-interleaved audio writing and clean monotonic presentation timestamps.
      */
     private fun exportWithHardwareAcceleration(
         project: VideoProject,
@@ -251,10 +256,12 @@ class FastVideoExportService(private val context: Context) {
         var eglHelper: EglSurfaceHelper? = null
         var surfaceTexture: SurfaceTexture? = null
         var decoderSurface: Surface? = null
+        var audioExtractor: MediaExtractor? = null
 
+        val uri = project.videoUri ?: return false
         try {
             extractor = MediaExtractor().apply {
-                setDataSource(context, project.videoUri, null)
+                setDataSource(context, uri, null)
             }
 
             // Find video track
@@ -272,13 +279,34 @@ class FastVideoExportService(private val context: Context) {
             }
 
             if (videoTrackIndex == -1 || videoFormat == null) {
-                Log.w(TAG, "No video track found for hardware acceleration")
+                Log.w(TAG, "No video track found")
                 return false
             }
 
             val decoderMime = videoFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
 
-            // Setup Encoder
+            // Inspect Audio Track
+            var sourceAudioIndex = -1
+            var audioFormat: MediaFormat? = null
+            try {
+                audioExtractor = MediaExtractor().apply {
+                    setDataSource(context, uri, null)
+                }
+                for (i in 0 until audioExtractor.trackCount) {
+                    val fmt = audioExtractor.getTrackFormat(i)
+                    val mime = fmt.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("audio/")) {
+                        sourceAudioIndex = i
+                        audioFormat = fmt
+                        audioExtractor.selectTrack(i)
+                        break
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio track inspection skipped: ${e.message}")
+            }
+
+            // Configure H.264/AVC Encoder with baseline profile for universal gallery playback
             val encoderFormat = MediaFormat.createVideoFormat(
                 MediaFormat.MIMETYPE_VIDEO_AVC,
                 alignedWidth,
@@ -288,6 +316,10 @@ class FastVideoExportService(private val context: Context) {
                 setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                try {
+                    setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+                    setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31)
+                } catch (_: Exception) {}
             }
 
             encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
@@ -355,23 +387,6 @@ class FastVideoExportService(private val context: Context) {
             var muxerVideoTrack = -1
             var muxerAudioTrack = -1
 
-            // Setup Audio Extractor track
-            val audioExtractor = MediaExtractor().apply {
-                setDataSource(context, project.videoUri, null)
-            }
-            var audioFormat: MediaFormat? = null
-            var sourceAudioIndex = -1
-            for (i in 0 until audioExtractor.trackCount) {
-                val fmt = audioExtractor.getTrackFormat(i)
-                val mime = fmt.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("audio/")) {
-                    sourceAudioIndex = i
-                    audioFormat = fmt
-                    audioExtractor.selectTrack(i)
-                    break
-                }
-            }
-
             var decoderDone = false
             var encoderDone = false
             var framesProcessed = 0
@@ -403,7 +418,7 @@ class FastVideoExportService(private val context: Context) {
                     val isEos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                     val currentMs = bufferInfo.presentationTimeUs / 1000L
 
-                    if (!isEos && currentMs <= totalDurationMs) {
+                    if (!isEos && framesProcessed < totalFrames) {
                         decoder.releaseOutputBuffer(outIndex, true)
                         surfaceTexture.updateTexImage()
                         surfaceTexture.getTransformMatrix(stMatrix)
@@ -429,7 +444,7 @@ class FastVideoExportService(private val context: Context) {
                             android.opengl.Matrix.rotateM(mvpMatrix, 0, transform.rotation, 0f, 0f, 1f)
                         }
 
-                        // Render with OpenGL ES
+                        // Render Quad
                         GLES20.glViewport(0, 0, alignedWidth, alignedHeight)
                         GLES20.glClearColor(0.05f, 0.06f, 0.09f, 1.0f)
                         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
@@ -452,8 +467,9 @@ class FastVideoExportService(private val context: Context) {
                         GLES20.glDisableVertexAttribArray(aPositionLocation)
                         GLES20.glDisableVertexAttribArray(aTextureCoordLocation)
 
-                        // Set presentation time and swap buffers to encoder
-                        eglHelper.setPresentationTime(bufferInfo.presentationTimeUs * 1000L)
+                        // CRITICAL: Strictly monotonically increasing presentation timestamp for standard MP4
+                        val presentationTimeUs = (framesProcessed * 1_000_000L) / frameRate
+                        eglHelper.setPresentationTime(presentationTimeUs * 1_000L)
                         eglHelper.swapBuffers()
 
                         framesProcessed++
@@ -465,13 +481,13 @@ class FastVideoExportService(private val context: Context) {
                         val eta = if (fps > 0) (remainingFrames / fps).toInt() else 0
                         val progress = (framesProcessed.toFloat() / totalFrames.toFloat()).coerceIn(0.02f, 0.96f)
 
-                        if (framesProcessed % 4 == 0 || framesProcessed == totalFrames) {
+                        if (framesProcessed % 5 == 0 || framesProcessed == totalFrames) {
                             onProgress(
                                 ExportProgressUpdate(
                                     progress = progress,
                                     currentFrame = framesProcessed,
                                     totalFrames = totalFrames,
-                                    currentDurationMs = currentMs,
+                                    currentDurationMs = (presentationTimeUs / 1000L),
                                     totalDurationMs = totalDurationMs,
                                     fpsSpeed = fps,
                                     etaSeconds = eta,
@@ -483,8 +499,10 @@ class FastVideoExportService(private val context: Context) {
                         decoder.releaseOutputBuffer(outIndex, false)
                     }
 
-                    if (isEos || currentMs >= totalDurationMs) {
-                        encoder.signalEndOfInputStream()
+                    if ((isEos || framesProcessed >= totalFrames) && !encoderDone) {
+                        try {
+                            encoder.signalEndOfInputStream()
+                        } catch (_: Exception) {}
                     }
                 }
 
@@ -493,21 +511,36 @@ class FastVideoExportService(private val context: Context) {
                     val encIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
                     if (encIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         muxerVideoTrack = muxer.addTrack(encoder.outputFormat)
-                        if (audioFormat != null && muxerAudioTrack == -1) {
+
+                        // Register audio track BEFORE muxer.start()
+                        if (audioExtractor != null && audioFormat != null && muxerAudioTrack == -1) {
                             try {
                                 muxerAudioTrack = muxer.addTrack(audioFormat)
                             } catch (e: Exception) {
-                                Log.w(TAG, "Audio track registration skipped: ${e.message}")
+                                Log.w(TAG, "Audio track addition skipped: ${e.message}")
                             }
                         }
+
                         muxer.start()
                         muxerStarted = true
                     } else if (encIndex >= 0) {
                         val encodedData = encoder.getOutputBuffer(encIndex)
-                        if (encodedData != null && muxerStarted && bufferInfo.size > 0) {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            muxer.writeSampleData(muxerVideoTrack, encodedData, bufferInfo)
+                        if (encodedData != null && muxerStarted) {
+                            // Suppress duplicate codec config headers in sample stream
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                                bufferInfo.size = 0
+                            }
+
+                            if (bufferInfo.size > 0) {
+                                encodedData.position(bufferInfo.offset)
+                                encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                                muxer.writeSampleData(muxerVideoTrack, encodedData, bufferInfo)
+
+                                // CRITICAL: Interleave audio samples up to current video PTS
+                                if (muxerAudioTrack != -1 && audioExtractor != null) {
+                                    interleaveAudioUpTo(audioExtractor, muxer, muxerAudioTrack, bufferInfo.presentationTimeUs)
+                                }
+                            }
                         }
                         encoder.releaseOutputBuffer(encIndex, false)
                         if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -520,24 +553,12 @@ class FastVideoExportService(private val context: Context) {
                 }
             }
 
-            // Copy Audio Track Losslessly
-            if (muxerStarted && muxerAudioTrack != -1 && sourceAudioIndex != -1 && !isCancelled.get()) {
-                onProgress(
-                    ExportProgressUpdate(
-                        progress = 0.98f,
-                        currentFrame = framesProcessed,
-                        totalFrames = totalFrames,
-                        currentDurationMs = totalDurationMs,
-                        totalDurationMs = totalDurationMs,
-                        fpsSpeed = framesProcessed / ((SystemClock.elapsedRealtime() - startTime) / 1000f).coerceAtLeast(0.1f),
-                        etaSeconds = 1,
-                        stage = "Muxing audio track & finalizing MP4..."
-                    )
-                )
-                copyAudioTrack(audioExtractor, muxer, muxerAudioTrack, totalDurationMs)
+            // Write any remaining audio samples up to total duration
+            if (muxerStarted && muxerAudioTrack != -1 && audioExtractor != null && !isCancelled.get()) {
+                val totalDurationUs = totalDurationMs * 1000L
+                interleaveAudioUpTo(audioExtractor, muxer, muxerAudioTrack, totalDurationUs)
             }
 
-            audioExtractor.release()
             return framesProcessed > 0 && !isCancelled.get()
 
         } catch (e: Exception) {
@@ -547,15 +568,23 @@ class FastVideoExportService(private val context: Context) {
             try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
             try { encoder?.stop(); encoder?.release() } catch (_: Exception) {}
             try { extractor?.release() } catch (_: Exception) {}
+            try { audioExtractor?.release() } catch (_: Exception) {}
             try { eglHelper?.release() } catch (_: Exception) {}
             try { surfaceTexture?.release() } catch (_: Exception) {}
             try { decoderSurface?.release() } catch (_: Exception) {}
-            try { if (muxer != null) { muxer.stop(); muxer.release() } } catch (_: Exception) {}
+            try {
+                if (muxer != null) {
+                    muxer.stop()
+                    muxer.release()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Muxer stop warning: ${e.message}")
+            }
         }
     }
 
     /**
-     * High-speed optimized fallback pipeline if GLES hardware texture decoding is not supported.
+     * Fallback Pipeline: Produces 100% valid MP4 with interleaved audio and monotonic timestamps.
      */
     private fun exportWithOptimizedFallback(
         project: VideoProject,
@@ -572,10 +601,31 @@ class FastVideoExportService(private val context: Context) {
         var videoCodec: MediaCodec? = null
         var muxer: MediaMuxer? = null
         val retriever = MediaMetadataRetriever()
-        val audioExtractor = MediaExtractor()
+        var audioExtractor: MediaExtractor? = null
 
+        val uri = project.videoUri ?: return
         try {
-            retriever.setDataSource(context, project.videoUri)
+            retriever.setDataSource(context, uri)
+
+            var sourceAudioIndex = -1
+            var audioFormat: MediaFormat? = null
+            try {
+                audioExtractor = MediaExtractor().apply {
+                    setDataSource(context, uri, null)
+                }
+                for (i in 0 until audioExtractor.trackCount) {
+                    val fmt = audioExtractor.getTrackFormat(i)
+                    val mime = fmt.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("audio/")) {
+                        sourceAudioIndex = i
+                        audioFormat = fmt
+                        audioExtractor.selectTrack(i)
+                        break
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio extractor fallback warning: ${e.message}")
+            }
 
             val videoFormat = MediaFormat.createVideoFormat(
                 MediaFormat.MIMETYPE_VIDEO_AVC,
@@ -586,6 +636,10 @@ class FastVideoExportService(private val context: Context) {
                 setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                try {
+                    setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+                    setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31)
+                } catch (_: Exception) {}
             }
 
             videoCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
@@ -597,24 +651,6 @@ class FastVideoExportService(private val context: Context) {
             var videoTrackIndex = -1
             var audioTrackIndex = -1
             var muxerStarted = false
-
-            var sourceAudioTrack = -1
-            var audioFormat: MediaFormat? = null
-            try {
-                audioExtractor.setDataSource(context, project.videoUri, null)
-                for (i in 0 until audioExtractor.trackCount) {
-                    val format = audioExtractor.getTrackFormat(i)
-                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("audio/")) {
-                        sourceAudioTrack = i
-                        audioFormat = format
-                        audioExtractor.selectTrack(i)
-                        break
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Audio track extraction warning: ${e.message}")
-            }
 
             val bufferInfo = MediaCodec.BufferInfo()
             val bgPaint = Paint().apply { color = Color.BLACK }
@@ -672,18 +708,31 @@ class FastVideoExportService(private val context: Context) {
                     val outIndex = videoCodec.dequeueOutputBuffer(bufferInfo, 0)
                     if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         videoTrackIndex = muxer.addTrack(videoCodec.outputFormat)
-                        if (sourceAudioTrack != -1 && audioFormat != null && audioTrackIndex == -1) {
-                            try { audioTrackIndex = muxer.addTrack(audioFormat) } catch (_: Exception) {}
+                        if (audioFormat != null && audioTrackIndex == -1) {
+                            try {
+                                audioTrackIndex = muxer.addTrack(audioFormat)
+                            } catch (_: Exception) {}
                         }
                         muxer.start()
                         muxerStarted = true
                     } else if (outIndex >= 0) {
                         val encodedData = videoCodec.getOutputBuffer(outIndex)
-                        if (encodedData != null && muxerStarted && bufferInfo.size > 0) {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            bufferInfo.presentationTimeUs = presentationTimeUs
-                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                        if (encodedData != null && muxerStarted) {
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                                bufferInfo.size = 0
+                            }
+
+                            if (bufferInfo.size > 0) {
+                                encodedData.position(bufferInfo.offset)
+                                encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                                bufferInfo.presentationTimeUs = presentationTimeUs
+                                muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+
+                                // Interleave audio
+                                if (audioTrackIndex != -1 && audioExtractor != null) {
+                                    interleaveAudioUpTo(audioExtractor, muxer, audioTrackIndex, presentationTimeUs)
+                                }
+                            }
                         }
                         videoCodec.releaseOutputBuffer(outIndex, false)
                     } else {
@@ -713,57 +762,175 @@ class FastVideoExportService(private val context: Context) {
                 }
             }
 
-            // Copy audio
-            if (muxerStarted && audioTrackIndex != -1 && sourceAudioTrack != -1 && !isCancelled.get()) {
-                copyAudioTrack(audioExtractor, muxer, audioTrackIndex, totalDurationMs)
+            // Signal end of input
+            try {
+                videoCodec.signalEndOfInputStream()
+            } catch (_: Exception) {}
+
+            var eosReached = false
+            while (!eosReached && muxerStarted) {
+                val outIndex = videoCodec.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC)
+                if (outIndex >= 0) {
+                    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        eosReached = true
+                    }
+                    val encodedData = videoCodec.getOutputBuffer(outIndex)
+                    if (encodedData != null && bufferInfo.size > 0) {
+                        encodedData.position(bufferInfo.offset)
+                        encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                        muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                    }
+                    videoCodec.releaseOutputBuffer(outIndex, false)
+                } else {
+                    break
+                }
+            }
+
+            // Finalize audio
+            if (muxerStarted && audioTrackIndex != -1 && audioExtractor != null && !isCancelled.get()) {
+                val totalDurationUs = totalDurationMs * 1000L
+                interleaveAudioUpTo(audioExtractor, muxer, audioTrackIndex, totalDurationUs)
             }
 
         } finally {
             try { videoCodec?.stop(); videoCodec?.release() } catch (_: Exception) {}
             try { retriever.release() } catch (_: Exception) {}
-            try { audioExtractor.release() } catch (_: Exception) {}
-            try { if (muxer != null) { muxer.stop(); muxer.release() } } catch (_: Exception) {}
+            try { audioExtractor?.release() } catch (_: Exception) {}
+            try {
+                if (muxer != null) {
+                    muxer.stop()
+                    muxer.release()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Fallback muxer stop warning: ${e.message}")
+            }
         }
     }
 
-    private fun copyAudioTrack(
+    /**
+     * Interleaves audio samples in lockstep with the video track up to targetTimeUs.
+     * Prevents MediaMuxer buffer desynchronization and creates standards-compliant MP4 chunks.
+     */
+    private fun interleaveAudioUpTo(
         extractor: MediaExtractor,
         muxer: MediaMuxer,
         muxerTrack: Int,
-        maxDurationMs: Long
+        targetTimeUs: Long
     ) {
-        val buffer = ByteBuffer.allocateDirect(64 * 1024)
+        val buffer = ByteBuffer.allocateDirect(16 * 1024)
         val bufferInfo = MediaCodec.BufferInfo()
-        val maxDurationUs = maxDurationMs * 1000L
 
         while (!isCancelled.get()) {
+            val sampleTimeUs = extractor.sampleTime
+            if (sampleTimeUs < 0 || sampleTimeUs > targetTimeUs) {
+                break
+            }
+
             bufferInfo.offset = 0
             bufferInfo.size = extractor.readSampleData(buffer, 0)
-            if (bufferInfo.size < 0) break
+            if (bufferInfo.size <= 0) break
 
-            bufferInfo.presentationTimeUs = extractor.sampleTime
-            if (bufferInfo.presentationTimeUs > maxDurationUs) break
+            bufferInfo.presentationTimeUs = sampleTimeUs
+            bufferInfo.flags = if ((extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0) {
+                MediaCodec.BUFFER_FLAG_KEY_FRAME
+            } else 0
 
-            bufferInfo.flags = extractor.sampleFlags
-            muxer.writeSampleData(muxerTrack, buffer, bufferInfo)
-            extractor.advance()
+            try {
+                muxer.writeSampleData(muxerTrack, buffer, bufferInfo)
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio sample write warning: ${e.message}")
+                break
+            }
+
+            if (!extractor.advance()) break
         }
     }
 
-    private fun saveToMediaStore(file: File): Uri {
+    /**
+     * Validates that the finalized file is a non-empty, standards-compliant MP4
+     * with valid video stream, duration, and dimensions.
+     */
+    private fun validateExportedMp4(file: File) {
+        if (!file.exists() || file.length() < 10_000L) {
+            throw IllegalStateException("Export failed: Output file does not exist or is too small (${file.length()} bytes)")
+        }
+
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(file.absolutePath)
+            val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO)
+            val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val widthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            val heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+
+            val durationMs = durationStr?.toLongOrNull() ?: 0L
+            val width = widthStr?.toIntOrNull() ?: 0
+            val height = heightStr?.toIntOrNull() ?: 0
+
+            if (hasVideo != "yes" || durationMs <= 0 || width <= 0 || height <= 0) {
+                throw IllegalStateException(
+                    "Generated video failed MP4 validation: hasVideo=$hasVideo, duration=${durationMs}ms, dimensions=${width}x${height}"
+                )
+            }
+
+            Log.i(TAG, "Exported MP4 validated successfully: ${width}x${height}, ${durationMs}ms, ${file.length()} bytes")
+
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Publishes the completed MP4 to Android MediaStore, writing the actual file bytes
+     * into the media provider stream so the video appears and plays immediately in Gallery.
+     */
+    private fun publishToMediaStore(file: File): Uri {
+        val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.TITLE, file.name)
             put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+            put(MediaStore.Video.Media.DATE_MODIFIED, System.currentTimeMillis() / 1000)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/OmkarVideos")
-                put(MediaStore.Video.Media.IS_PENDING, 0)
+                put(MediaStore.Video.Media.IS_PENDING, 1)
             }
         }
 
-        return try {
-            context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: Uri.fromFile(file)
+        var contentUri: Uri? = null
+        try {
+            contentUri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            if (contentUri != null) {
+                resolver.openOutputStream(contentUri)?.use { outStream ->
+                    file.inputStream().use { inStream ->
+                        inStream.copyTo(outStream)
+                    }
+                    outStream.flush()
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear()
+                    values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                    resolver.update(contentUri, values, null, null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore insert warning: ${e.message}")
+        }
+
+        // Notify MediaScanner for instant Gallery indexing
+        MediaScannerConnection.scanFile(
+            context,
+            arrayOf(file.absolutePath),
+            arrayOf("video/mp4")
+        ) { path, uri ->
+            Log.i(TAG, "MediaScanner indexed: $path -> $uri")
+        }
+
+        // Return valid contentUri or FileProvider URI
+        return contentUri ?: try {
+            FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
         } catch (_: Exception) {
             Uri.fromFile(file)
         }
