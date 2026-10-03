@@ -530,15 +530,25 @@ fun TimelineView(
                         }
                     }
 
-                    // Layer 5: Playhead Scrubber Line
-                    val playheadX = (currentPlayheadMs * msToDpRatio).dp
+                    // Layer 5: High-Precision Playhead Scrubber Line & Handle
                     Box(
                         modifier = Modifier
-                            .offset(x = playheadX - 1.dp)
+                            .offset { IntOffset((currentPlayheadMs * msToDpRatio).dp.roundToPx() - 1, 0) }
                             .width(2.5.dp)
                             .fillMaxHeight()
                             .background(OmkarGold)
-                    )
+                    ) {
+                        // Top Playhead Scrubber Pill Handle
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .offset(y = (-3).dp)
+                                .size(width = 9.dp, height = 9.dp)
+                                .clip(CircleShape)
+                                .background(OmkarGold)
+                                .border(1.dp, Color.White, CircleShape)
+                        )
+                    }
                 }
             }
         }

@@ -80,6 +80,7 @@ fun ClipInspector(
     onSelectMotionMode: ((MotionMode) -> Unit)? = null,
     onRegenerateMotion: (() -> Unit)? = null,
     onAddKeyframeAtPlayhead: (() -> Unit)? = null,
+    onAddKeyframe: ((scale: Float, posX: Float, posY: Float, curve: MotionCurve) -> Unit)? = null,
     onDeleteKeyframe: ((String) -> Unit)? = null
 ) {
     Card(
@@ -293,6 +294,32 @@ fun ClipInspector(
                 color = OmkarCyan,
                 onUpdate = onUpdateKeyframe
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Add Keyframe Action
+            ElevatedButton(
+                onClick = {
+                    if (onAddKeyframe != null) {
+                        onAddKeyframe(1.15f, 0f, 0f, MotionCurve.DYNAMIC_PUNCH)
+                    } else {
+                        onAddKeyframeAtPlayhead?.invoke()
+                    }
+                },
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.elevatedButtonColors(
+                    containerColor = OmkarPurple,
+                    contentColor = Color.White
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+                    .testTag("add_keyframe_button")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(text = "Add Keyframe at Playhead", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
         }
     }
 }

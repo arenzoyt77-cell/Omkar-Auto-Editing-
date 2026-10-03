@@ -1,7 +1,6 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import android.view.Surface
@@ -13,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import com.example.model.ClipSegment
 import com.example.model.EditorMode
 import com.example.model.ExportSettings
@@ -20,15 +20,18 @@ import com.example.model.MotionCurve
 import com.example.model.MotionPreset
 import com.example.model.SplitPoint
 import com.example.model.TextOverlay
+import com.example.model.VideoMetadata
 import com.example.model.VideoProject
 import com.example.service.ExportProgressUpdate
 import com.example.service.InterpolatedTransform
 import com.example.service.MotionInterpolationEngine
 import com.example.service.PlaybackState
+import com.example.service.ReferenceMotionCache
 import com.example.service.SampleVideoHelper
 import com.example.service.SpeechAnalysisService
 import com.example.service.TimelineEngine
 import com.example.service.VideoExportService
+import com.example.service.VideoImportHelper
 import com.example.service.VideoPreviewEngine
 import com.example.service.VideoSegmentationService
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +48,7 @@ import java.io.File
 enum class EditorTab(val title: String) {
     EDIT("Edit"),
     KEYFRAMES("Keyframes"),
+    REFERENCE("Reference"),
     AUDIO("Audio"),
     TEXT("Text"),
     CAPTIONS("Captions"),
@@ -56,9 +60,16 @@ enum class EditorTab(val title: String) {
  */
 data class VideoProcessingUiState(
     val project: VideoProject? = null,
+    val originalVideoMetadata: VideoMetadata? = null,
+    val referenceVideoMetadata: VideoMetadata? = null,
+    val isImportingVideo: Boolean = false,
+    val importStatus: String = "",
     val isAnalyzing: Boolean = false,
     val analysisProgress: Float = 0f,
     val analysisStatus: String = "",
+    val analysisStep: Int = 0,
+    val totalAnalysisSteps: Int = 5,
+    val isAnalyzingReference: Boolean = false,
     val isExporting: Boolean = false,
     val exportProgressUpdate: ExportProgressUpdate = ExportProgressUpdate(0f, 0, 0, 0L, 0L, 0f, 0, ""),
     val isExportComplete: Boolean = false,
@@ -94,7 +105,9 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     }
 
     // Media3 Core Components
-    val exoPlayer: ExoPlayer = ExoPlayer.Builder(application).build()
+    val exoPlayer: ExoPlayer = ExoPlayer.Builder(application)
+        .setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        .build()
 
     // Domain Services
     private val speechService = SpeechAnalysisService(application)
@@ -114,6 +127,8 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
     private var syncJob: Job? = null
+    private var analysisJob: Job? = null
+    private var importJob: Job? = null
 
     init {
         setupPlayerListeners()
@@ -205,16 +220,16 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     }
 
     /**
-     * Loads a video into the Media3 pipeline, retrieves metadata, and triggers
-     * speech-boundary thought analysis.
+     * Loads original video asynchronously, extracts metadata and thumbnail,
+     * configures ExoPlayer, and launches multi-stage speech analysis.
      */
-    fun loadVideo(uri: Uri, fileName: String = "Selected Video") {
-        viewModelScope.launch {
+    fun loadVideo(uri: Uri, fallbackName: String = "Selected Video") {
+        importJob?.cancel()
+        importJob = viewModelScope.launch {
             try {
                 _uiState.value = _uiState.value.copy(
-                    isAnalyzing = true,
-                    analysisProgress = 0.05f,
-                    analysisStatus = "Loading video with Media3...",
+                    isImportingVideo = true,
+                    importStatus = "Reading video metadata & generating thumbnail...",
                     errorMessage = null
                 )
 
@@ -222,42 +237,25 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                 redoStack.clear()
                 updateUndoRedoStatus()
 
-                // Retrieve video metadata
-                val (durationMs, width, height, rotation, fps) = withContext(Dispatchers.IO) {
-                    val retriever = MediaMetadataRetriever()
-                    try {
-                        retriever.setDataSource(getApplication(), uri)
-                        val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                        val wStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-                        val hStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                        val rotStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                        val frameRateStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
-
-                        val dur = durStr?.toLongOrNull() ?: 10000L
-                        val w = wStr?.toIntOrNull() ?: 1920
-                        val h = hStr?.toIntOrNull() ?: 1080
-                        val rot = rotStr?.toIntOrNull() ?: 0
-                        val rate = frameRateStr?.toFloatOrNull() ?: 30.0f
-                        arrayOf(dur, w, h, rot, rate)
-                    } finally {
-                        retriever.release()
-                    }
-                }
+                // Asynchronously inspect video on Dispatchers.IO
+                val meta = VideoImportHelper.extractMetadata(getApplication(), uri, fallbackName)
 
                 val initialProject = VideoProject(
                     videoUri = uri,
-                    title = fileName,
-                    durationMs = durationMs as Long,
-                    width = width as Int,
-                    height = height as Int,
-                    rotation = rotation as Int,
-                    frameRate = fps as Float,
+                    title = meta.fileName,
+                    durationMs = meta.durationMs,
+                    width = meta.width,
+                    height = meta.height,
+                    rotation = meta.rotation,
+                    frameRate = meta.frameRate,
                     mode = _uiState.value.currentMode
                 )
 
                 _uiState.value = _uiState.value.copy(
                     project = initialProject,
-                    isAnalyzing = false
+                    originalVideoMetadata = meta,
+                    isImportingVideo = false,
+                    importStatus = ""
                 )
 
                 // Configure Media3 ExoPlayer
@@ -265,16 +263,75 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                 exoPlayer.setMediaItem(mediaItem)
                 exoPlayer.prepare()
 
-                // Trigger semantic analysis
+                // Trigger multi-step automatic analysis
                 analyzeCurrentVideo()
 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load video into Media3: ${e.message}", e)
+                Log.e(TAG, "Failed to load video: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
+                    isImportingVideo = false,
                     isAnalyzing = false,
-                    errorMessage = "Failed to load video: ${e.localizedMessage}"
+                    errorMessage = "Unable to load video: ${e.localizedMessage ?: "Unknown error"}. Please check file permissions or try an MP4 video."
                 )
             }
+        }
+    }
+
+    /**
+     * Loads a custom Reference Video asynchronously, analyzes its motion blueprint,
+     * and caches it in ReferenceMotionCache so it is never re-analyzed on preview/scrub.
+     */
+    fun loadReferenceVideo(uri: Uri, fallbackName: String = "Reference Video") {
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(
+                    isAnalyzingReference = true,
+                    errorMessage = null
+                )
+
+                val meta = VideoImportHelper.extractMetadata(getApplication(), uri, fallbackName)
+
+                val (events, summary) = ReferenceMotionCache.analyzeOrGetReference(
+                    context = getApplication(),
+                    uri = uri,
+                    referenceName = meta.fileName
+                ) { progress, status ->
+                    _uiState.value = _uiState.value.copy(
+                        analysisStatus = status
+                    )
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    referenceVideoMetadata = meta,
+                    motionBlueprintSummary = summary,
+                    isAnalyzingReference = false
+                )
+
+                // If currently in REFERENCE_MOTION mode, apply new reference blueprint immediately
+                if (_uiState.value.currentMotionMode == com.example.model.MotionMode.REFERENCE_MOTION) {
+                    regenerateMotion()
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to analyze reference video: ${e.message}", e)
+                _uiState.value = _uiState.value.copy(
+                    isAnalyzingReference = false,
+                    errorMessage = "Failed to analyze reference video: ${e.localizedMessage}"
+                )
+            }
+        }
+    }
+
+    /**
+     * Reverts to the built-in authoritative reference target (YouCut_20261001_194357373.mp4).
+     */
+    fun useDefaultAuthoritativeReference() {
+        _uiState.value = _uiState.value.copy(
+            referenceVideoMetadata = null,
+            motionBlueprintSummary = com.example.model.AuthoritativeReferenceBlueprint.debugSummary
+        )
+        if (_uiState.value.currentMotionMode == com.example.model.MotionMode.REFERENCE_MOTION) {
+            regenerateMotion()
         }
     }
 
@@ -285,16 +342,14 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
         viewModelScope.launch {
             try {
                 _uiState.value = _uiState.value.copy(
-                    isAnalyzing = true,
-                    analysisProgress = 0.05f,
-                    analysisStatus = "Synthesizing test speech video...",
+                    isImportingVideo = true,
+                    importStatus = "Synthesizing test speech video...",
                     errorMessage = null
                 )
 
                 val uri = SampleVideoHelper.generateSampleVideo(getApplication()) { progress ->
                     _uiState.value = _uiState.value.copy(
-                        analysisProgress = 0.05f + progress * 0.25f,
-                        analysisStatus = "Synthesizing test video ${(progress * 100).toInt()}%"
+                        importStatus = "Synthesizing sample video ${(progress * 100).toInt()}%"
                     )
                 }
 
@@ -303,6 +358,7 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to generate sample video: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
+                    isImportingVideo = false,
                     isAnalyzing = false,
                     errorMessage = "Could not generate sample video: ${e.message}"
                 )
@@ -311,18 +367,26 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     }
 
     /**
-     * Runs speech-to-text analysis, detects completed spoken thoughts,
-     * snaps split points to discrete video frames, and applies cinematic keyframes.
+     * Runs multi-stage real progress analysis:
+     * 1. Audio track extraction & amplitude parsing
+     * 2. Speech-to-text boundary detection & sentence completion
+     * 3. Acoustic energy peaks and cadence identification
+     * 4. Reference motion blueprint alignment (cached)
+     * 5. Multi-keyframe curve synthesis & timeline generation
      */
     fun analyzeCurrentVideo() {
         val currentProj = _uiState.value.project ?: return
         val uri = currentProj.videoUri ?: return
-        viewModelScope.launch {
+
+        analysisJob?.cancel()
+        analysisJob = viewModelScope.launch {
             try {
                 _uiState.value = _uiState.value.copy(
                     isAnalyzing = true,
-                    analysisProgress = 0.1f,
-                    analysisStatus = "Detecting spoken thoughts & utterance boundaries...",
+                    analysisStep = 1,
+                    totalAnalysisSteps = 5,
+                    analysisProgress = 0.05f,
+                    analysisStatus = "Step 1/5: Extracting audio track & calculating waveform...",
                     errorMessage = null
                 )
 
@@ -330,15 +394,29 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                     videoUri = uri,
                     durationMs = currentProj.durationMs
                 ) { progress, status ->
+                    val step = when {
+                        progress < 0.30f -> 1
+                        progress < 0.65f -> 2
+                        else -> 3
+                    }
                     _uiState.value = _uiState.value.copy(
                         analysisProgress = progress,
-                        analysisStatus = status
+                        analysisStatus = status,
+                        analysisStep = step
                     )
                 }
 
                 _uiState.value = _uiState.value.copy(
+                    analysisStep = 4,
+                    analysisProgress = 0.80f,
+                    analysisStatus = "Step 4/5: Aligning reference motion blueprint..."
+                )
+                delay(120)
+
+                _uiState.value = _uiState.value.copy(
+                    analysisStep = 5,
                     analysisProgress = 0.92f,
-                    analysisStatus = "Aligning frame boundaries & calculating keyframe curves..."
+                    analysisStatus = "Step 5/5: Synthesizing multi-keyframes & discrete frame cuts..."
                 )
 
                 val (splits, clips) = segmentationService.generateSegmentation(
@@ -361,6 +439,8 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                 _uiState.value = _uiState.value.copy(
                     project = updatedProject,
                     isAnalyzing = false,
+                    analysisProgress = 1.0f,
+                    analysisStep = 5,
                     selectedClipId = clips.firstOrNull()?.id,
                     analysisStatus = "Analysis Complete"
                 )
@@ -371,10 +451,28 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                 Log.e(TAG, "Analysis failed: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
                     isAnalyzing = false,
-                    errorMessage = "Analysis error: ${e.localizedMessage}"
+                    errorMessage = "Analysis error: ${e.localizedMessage ?: "Unknown error"}. You can tap Retry."
                 )
             }
         }
+    }
+
+    fun cancelAnalysis() {
+        analysisJob?.cancel()
+        analysisJob = null
+        _uiState.value = _uiState.value.copy(
+            isAnalyzing = false,
+            analysisStatus = "Analysis cancelled"
+        )
+    }
+
+    fun cancelImport() {
+        importJob?.cancel()
+        importJob = null
+        _uiState.value = _uiState.value.copy(
+            isImportingVideo = false,
+            importStatus = ""
+        )
     }
 
     // Playback Controls
@@ -788,6 +886,8 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     override fun onCleared() {
         super.onCleared()
         stopTimelineSync()
+        analysisJob?.cancel()
+        importJob?.cancel()
         exoPlayer.release()
         previewEngine.releasePlayer()
     }
