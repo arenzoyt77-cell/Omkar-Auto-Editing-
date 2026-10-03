@@ -174,7 +174,7 @@ fun ClipInspector(
 
             // Start Keyframe Control
             Text(
-                text = "Start Keyframe Zoom: ${(clip.startKeyframe.scale * 100).toInt()}%",
+                text = "Start Keyframe Zoom: ${(clip.startKeyframe.scale * 100).toInt()}% • Pos X: ${clip.startKeyframe.positionX.toInt()}% • Y: ${clip.startKeyframe.positionY.toInt()}%",
                 fontSize = 12.sp,
                 color = Color.LightGray
             )
@@ -183,16 +183,39 @@ fun ClipInspector(
                 onValueChange = { newScale ->
                     onUpdateKeyframe(clip.startKeyframe.id, newScale, null, null, null, null)
                 },
-                valueRange = 1.0f..1.50f,
+                valueRange = 1.0f..1.60f,
                 colors = SliderDefaults.colors(
                     thumbColor = OmkarGold,
                     activeTrackColor = OmkarGold
                 )
             )
 
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Start X", fontSize = 10.sp, color = Color.Gray)
+                    Slider(
+                        value = clip.startKeyframe.positionX,
+                        onValueChange = { onUpdateKeyframe(clip.startKeyframe.id, null, it, null, null, null) },
+                        valueRange = -30f..30f,
+                        colors = SliderDefaults.colors(thumbColor = OmkarGold, activeTrackColor = OmkarGold)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Start Y", fontSize = 10.sp, color = Color.Gray)
+                    Slider(
+                        value = clip.startKeyframe.positionY,
+                        onValueChange = { onUpdateKeyframe(clip.startKeyframe.id, null, null, it, null, null) },
+                        valueRange = -30f..30f,
+                        colors = SliderDefaults.colors(thumbColor = OmkarGold, activeTrackColor = OmkarGold)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             // End Keyframe Control
             Text(
-                text = "End Keyframe Zoom: ${(clip.endKeyframe.scale * 100).toInt()}%",
+                text = "End Keyframe Zoom: ${(clip.endKeyframe.scale * 100).toInt()}% • Pos X: ${clip.endKeyframe.positionX.toInt()}% • Y: ${clip.endKeyframe.positionY.toInt()}%",
                 fontSize = 12.sp,
                 color = Color.LightGray
             )
@@ -201,12 +224,33 @@ fun ClipInspector(
                 onValueChange = { newScale ->
                     onUpdateKeyframe(clip.endKeyframe.id, newScale, null, null, null, null)
                 },
-                valueRange = 1.0f..1.50f,
+                valueRange = 1.0f..1.60f,
                 colors = SliderDefaults.colors(
                     thumbColor = OmkarCyan,
                     activeTrackColor = OmkarCyan
                 )
             )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "End X", fontSize = 10.sp, color = Color.Gray)
+                    Slider(
+                        value = clip.endKeyframe.positionX,
+                        onValueChange = { onUpdateKeyframe(clip.endKeyframe.id, null, it, null, null, null) },
+                        valueRange = -30f..30f,
+                        colors = SliderDefaults.colors(thumbColor = OmkarCyan, activeTrackColor = OmkarCyan)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "End Y", fontSize = 10.sp, color = Color.Gray)
+                    Slider(
+                        value = clip.endKeyframe.positionY,
+                        onValueChange = { onUpdateKeyframe(clip.endKeyframe.id, null, null, it, null, null) },
+                        valueRange = -30f..30f,
+                        colors = SliderDefaults.colors(thumbColor = OmkarCyan, activeTrackColor = OmkarCyan)
+                    )
+                }
+            }
 
             // Motion Easing Curve Selector
             Text(

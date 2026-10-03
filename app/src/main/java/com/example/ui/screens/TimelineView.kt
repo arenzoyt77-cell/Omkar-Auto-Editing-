@@ -26,10 +26,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.ButtonDefaults
@@ -84,15 +88,20 @@ fun TimelineView(
     onAddSplitAtPlayhead: () -> Unit,
     onDeleteSplit: (String) -> Unit,
     onMoveSplit: (String, Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDeleteClip: ((String) -> Unit)? = null,
+    onDuplicateClip: ((String) -> Unit)? = null,
+    onToggleClipMute: ((String) -> Unit)? = null,
+    onOpenTextOverlayDialog: (() -> Unit)? = null
 ) {
     var zoomScale by remember { mutableFloatStateOf(1.0f) }
-    val totalDurationMs = project.durationMs.coerceAtLeast(1000L)
-    val baseTimelineWidthDp = 360f
+    val totalDurationMs = project.effectiveDurationMs.coerceAtLeast(1000L)
+    val baseTimelineWidthDp = 380f
     val timelineWidthDp = (baseTimelineWidthDp * zoomScale).coerceAtLeast(baseTimelineWidthDp)
     val msToDpRatio = timelineWidthDp / totalDurationMs.toFloat()
 
     val scrollState = rememberScrollState()
+    val activeClip = project.clips.firstOrNull { it.id == selectedClipId }
 
     Column(
         modifier = modifier
@@ -118,109 +127,137 @@ fun TimelineView(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Professional Timeline",
+                    text = "Interactive Timeline",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = Color.White
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "(${project.clips.size} Clips • ${project.splitPoints.size} Splits)",
+                    text = "(${project.clips.size} Clips)",
                     fontSize = 12.sp,
                     color = Color.Gray
                 )
             }
 
-            // Quick actions
+            // Quick actions & Timeline Zoom
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
                     onClick = { zoomScale = (zoomScale - 0.25f).coerceAtLeast(0.8f) },
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(30.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ZoomOut,
                         contentDescription = "Zoom Out",
                         tint = Color.LightGray,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
                 IconButton(
-                    onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(3.0f) },
-                    modifier = Modifier.size(32.dp)
+                    onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(3.5f) },
+                    modifier = Modifier.size(30.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ZoomIn,
                         contentDescription = "Zoom In",
                         tint = Color.LightGray,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // Split Action Bar
+        // Split & Clip Management Sub-Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ElevatedButton(
-                onClick = onAddSplitAtPlayhead,
-                colors = ButtonDefaults.elevatedButtonColors(
-                    containerColor = OmkarGold,
-                    contentColor = Color.Black
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.testTag("add_split_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(text = "Split at Playhead", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Split at playhead
+                ElevatedButton(
+                    onClick = onAddSplitAtPlayhead,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.elevatedButtonColors(
+                        containerColor = SurfaceVariantDark,
+                        contentColor = OmkarGold
+                    ),
+                    modifier = Modifier.testTag("timeline_split_button")
+                ) {
+                    Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Split", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Add Text
+                if (onOpenTextOverlayDialog != null) {
+                    FilledTonalButton(
+                        onClick = onOpenTextOverlayDialog,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = SurfaceVariantDark,
+                            contentColor = OmkarCyan
+                        )
+                    ) {
+                        Icon(Icons.Default.TextFields, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Add Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
 
-            if (selectedSplitId != null) {
-                val activeSplit = project.splitPoints.firstOrNull { it.id == selectedSplitId }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = {
-                            if (activeSplit != null) {
-                                onMoveSplit(activeSplit.id, (activeSplit.timestampMs - 150L).coerceAtLeast(0L))
-                            }
-                        },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.FastRewind, contentDescription = "Nudge -150ms", tint = OmkarCyan)
+            // Clip Quick Actions (Delete, Duplicate, Mute)
+            if (activeClip != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (onToggleClipMute != null) {
+                        IconButton(
+                            onClick = { onToggleClipMute(activeClip.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (activeClip.isMuted) Icons.Default.VolumeMute else Icons.Default.VolumeUp,
+                                contentDescription = "Mute Clip",
+                                tint = if (activeClip.isMuted) OmkarCutRed else Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
 
-                    IconButton(
-                        onClick = {
-                            if (activeSplit != null) {
-                                onMoveSplit(activeSplit.id, (activeSplit.timestampMs + 150L).coerceAtMost(totalDurationMs))
-                            }
-                        },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.FastForward, contentDescription = "Nudge +150ms", tint = OmkarCyan)
+                    if (onDuplicateClip != null) {
+                        IconButton(
+                            onClick = { onDuplicateClip(activeClip.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Duplicate Clip",
+                                tint = OmkarCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
 
-                    IconButton(
-                        onClick = { onDeleteSplit(selectedSplitId) },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete Split", tint = OmkarCutRed)
+                    if (onDeleteClip != null && project.clips.size > 1) {
+                        IconButton(
+                            onClick = { onDeleteClip(activeClip.id) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete Clip",
+                                tint = OmkarCutRed,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Scrollable Multi-Layer Timeline Track
         Box(
@@ -241,13 +278,21 @@ fun TimelineView(
                             onSeek(targetMs)
                         }
                     }
-                    .padding(vertical = 8.dp)
+                    .pointerInput(totalDurationMs, timelineWidthDp) {
+                        detectDragGestures { change, _ ->
+                            change.consume()
+                            val dragRatio = (change.position.x / size.width).coerceIn(0f, 1f)
+                            val targetMs = (dragRatio * totalDurationMs).toLong()
+                            onSeek(targetMs)
+                        }
+                    }
+                    .padding(vertical = 6.dp)
             ) {
                 // Layer 1: Time Ruler
                 Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(18.dp)
+                        .height(16.dp)
                 ) {
                     val seconds = (totalDurationMs / 1000).toInt() + 1
                     for (s in 0..seconds) {
@@ -255,7 +300,7 @@ fun TimelineView(
                         drawLine(
                             color = Color(0xFF64748B),
                             start = Offset(x, 0f),
-                            end = Offset(x, 14f),
+                            end = Offset(x, 12f),
                             strokeWidth = 2f
                         )
                     }
@@ -267,7 +312,7 @@ fun TimelineView(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(38.dp)
+                        .height(34.dp)
                         .background(SurfaceVariantDark)
                 ) {
                     // Audio waveform bars
@@ -316,13 +361,48 @@ fun TimelineView(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                // Layer 3: Text Overlays Track (if any text overlays exist)
+                if (project.textOverlays.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(20.dp)
+                            .background(Color(0xFF131722))
+                    ) {
+                        for (overlay in project.textOverlays) {
+                            val startDp = (overlay.startMs * msToDpRatio).dp
+                            val widthDp = ((overlay.endMs - overlay.startMs) * msToDpRatio).dp.coerceAtLeast(24.dp)
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = startDp)
+                                    .width(widthDp)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(OmkarGold.copy(alpha = 0.35f))
+                                    .border(1.dp, OmkarGold, RoundedCornerShape(3.dp))
+                                    .padding(horizontal = 3.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    text = overlay.text,
+                                    color = OmkarGold,
+                                    fontSize = 8.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
 
-                // Layer 3: Clips Strip with Keyframe Markers
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Layer 4: Clips Strip with Keyframe Markers
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(54.dp)
+                        .height(52.dp)
                 ) {
                     for (clip in project.clips) {
                         val startDp = (clip.startMs * msToDpRatio).dp
@@ -358,12 +438,23 @@ fun TimelineView(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "Clip 0${clip.index}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        color = if (isSelected) OmkarGold else Color.White
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Clip 0${clip.index}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = if (isSelected) OmkarGold else Color.White
+                                        )
+                                        if (clip.isMuted) {
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.VolumeMute,
+                                                contentDescription = "Muted",
+                                                tint = OmkarCutRed,
+                                                modifier = Modifier.size(11.dp)
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = "${(clip.durationMs / 1000f)}s",
                                         fontSize = 9.sp,
@@ -382,7 +473,7 @@ fun TimelineView(
                                             imageVector = Icons.Default.Diamond,
                                             contentDescription = "Start Keyframe",
                                             tint = OmkarGold,
-                                            modifier = Modifier.size(12.dp)
+                                            modifier = Modifier.size(11.dp)
                                         )
                                         Text(
                                             text = "${(clip.startKeyframe.scale * 100).toInt()}%",
@@ -403,7 +494,7 @@ fun TimelineView(
                                             imageVector = Icons.Default.Diamond,
                                             contentDescription = "End Keyframe",
                                             tint = OmkarCyan,
-                                            modifier = Modifier.size(12.dp)
+                                            modifier = Modifier.size(11.dp)
                                         )
                                     }
                                 }
@@ -439,12 +530,12 @@ fun TimelineView(
                         }
                     }
 
-                    // Layer 4: Playhead Scrubber Needle
+                    // Layer 5: Playhead Scrubber Line
                     val playheadX = (currentPlayheadMs * msToDpRatio).dp
                     Box(
                         modifier = Modifier
                             .offset(x = playheadX - 1.dp)
-                            .width(2.dp)
+                            .width(2.5.dp)
                             .fillMaxHeight()
                             .background(OmkarGold)
                     )

@@ -31,7 +31,10 @@ data class ClipSegment(
     val endKeyframe: Keyframe,
     val intermediateKeyframes: List<Keyframe> = emptyList(),
     val motionPreset: MotionPreset = MotionPreset.CINEMATIC_PUSH_IN,
-    val thumbnailBitmapPath: String? = null
+    val thumbnailBitmapPath: String? = null,
+    val isMuted: Boolean = false,
+    val volume: Float = 1.0f,
+    val speed: Float = 1.0f
 ) {
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0L)
 

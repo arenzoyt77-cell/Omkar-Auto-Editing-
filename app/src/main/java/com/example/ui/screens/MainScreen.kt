@@ -1,10 +1,12 @@
 package com.example.ui.screens
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,7 +18,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,18 +32,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Diamond
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.VideoLibrary
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -56,9 +59,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -79,15 +88,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.example.model.ClipSegment
 import com.example.model.EditorMode
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.BorderDark
+import com.example.ui.theme.OmkarCutRed
 import com.example.ui.theme.OmkarCyan
 import com.example.ui.theme.OmkarGold
 import com.example.ui.theme.OmkarGreen
 import com.example.ui.theme.OmkarPurple
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceVariantDark
+import com.example.ui.viewmodel.EditorTab
 import com.example.ui.viewmodel.VideoProcessingViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -136,11 +148,11 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
                             Text(
                                 text = "OMKAR AUTOMATIC VIDEO MAKER",
                                 fontWeight = FontWeight.Black,
-                                fontSize = 15.sp,
+                                fontSize = 14.sp,
                                 color = Color.White
                             )
                             Text(
-                                text = "Speech-Boundary Detection • Keyframe Motion",
+                                text = "Speech Detection • Hardware Accelerated Export",
                                 fontSize = 10.sp,
                                 color = OmkarGold
                             )
@@ -148,27 +160,71 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
                     }
                 },
                 actions = {
-                    // Mode Switcher: SIMPLE MODE vs SMART MODE
-                    Row(modifier = Modifier.padding(end = 8.dp)) {
-                        FilterChip(
-                            selected = uiState.currentMode == EditorMode.SIMPLE,
-                            onClick = { viewModel.setMode(EditorMode.SIMPLE) },
-                            label = { Text("SIMPLE", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = OmkarGold,
-                                selectedLabelColor = Color.Black
-                            )
+                    // Undo & Redo Actions
+                    IconButton(
+                        onClick = { viewModel.undo() },
+                        enabled = uiState.canUndo,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Undo,
+                            contentDescription = "Undo",
+                            tint = if (uiState.canUndo) Color.White else Color.DarkGray
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        FilterChip(
-                            selected = uiState.currentMode == EditorMode.SMART,
-                            onClick = { viewModel.setMode(EditorMode.SMART) },
-                            label = { Text("SMART", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = OmkarCyan,
-                                selectedLabelColor = Color.Black
-                            )
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.redo() },
+                        enabled = uiState.canRedo,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Redo,
+                            contentDescription = "Redo",
+                            tint = if (uiState.canRedo) Color.White else Color.DarkGray
                         )
+                    }
+
+                    // Mode Switcher: SIMPLE vs SMART
+                    FilterChip(
+                        selected = uiState.currentMode == EditorMode.SMART,
+                        onClick = {
+                            val nextMode = if (uiState.currentMode == EditorMode.SMART) EditorMode.SIMPLE else EditorMode.SMART
+                            viewModel.setMode(nextMode)
+                        },
+                        label = {
+                            Text(
+                                text = if (uiState.currentMode == EditorMode.SMART) "SMART" else "SIMPLE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = OmkarGold,
+                            selectedLabelColor = Color.Black
+                        ),
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+
+                    // Top Export Button
+                    if (uiState.project != null) {
+                        ElevatedButton(
+                            onClick = { viewModel.openExportDialog() },
+                            colors = ButtonDefaults.elevatedButtonColors(
+                                containerColor = OmkarGold,
+                                contentColor = Color.Black
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .height(32.dp)
+                                .testTag("top_export_button"),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                        ) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "EXPORT", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -178,22 +234,21 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = BackgroundDark,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        containerColor = BackgroundDark
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(scrollState)
-                .padding(16.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             val project = uiState.project
 
             if (project == null) {
-                // Initial State: Pick Video or Try Sample Video
-                InitialVideoSelectionView(
-                    onPickVideo = {
+                // Initial State: Prompt User to Import Video or Use Speech Test Video
+                VideoImportCard(
+                    onImportClick = {
                         videoPickerLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
                         )
@@ -201,201 +256,163 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
                     onTrySampleVideo = { viewModel.loadSampleSpeechVideo() }
                 )
             } else {
-                // Video is loaded: Editor Pipeline View
-                // 1. Video Preview Player with dynamic Keyframe Graphics Layer
+                // Video is loaded: Real-Time Mobile Video Editor Workspace
+
+                // 1. Large Video Preview Player showing exact keyframes, cuts & text overlays
                 VideoPreviewPlayer(
-                    previewEngine = viewModel.previewEngine,
                     playbackState = playbackState,
-                    totalDurationMs = project.durationMs
+                    totalDurationMs = project.effectiveDurationMs,
+                    onAttachSurface = { viewModel.setVideoSurface(it) },
+                    onDetachSurface = { viewModel.setVideoSurface(null) },
+                    onTogglePlayPause = { viewModel.togglePlayPause() },
+                    onSeek = { ms -> viewModel.seekTo(ms) },
+                    onRestart = { viewModel.seekTo(0L) },
+                    isMuted = uiState.isMuted,
+                    onToggleMute = { viewModel.toggleMute() },
+                    textOverlays = project.textOverlays
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Action Bar (Analyze Video, Preview Result, Edit Timeline, Export Video)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ElevatedButton(
-                        onClick = { viewModel.analyzeCurrentVideo() },
-                        colors = ButtonDefaults.elevatedButtonColors(
-                            containerColor = SurfaceVariantDark,
-                            contentColor = OmkarGold
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("analyze_video_button")
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Analyze", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    ElevatedButton(
-                        onClick = { viewModel.previewEngine.togglePlayPause() },
-                        colors = ButtonDefaults.elevatedButtonColors(
-                            containerColor = SurfaceVariantDark,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Preview", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    ElevatedButton(
-                        onClick = { viewModel.openExportDialog() },
-                        colors = ButtonDefaults.elevatedButtonColors(
-                            containerColor = OmkarGold,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("export_video_button")
-                    ) {
-                        Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Export", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Section: Detected Clips Strip
-                if (project.clips.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Detected Clips (${project.clips.size})",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "Auto Keyframed (100% -> 112%)",
-                            fontSize = 11.sp,
-                            color = OmkarGold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(vertical = 4.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(project.clips) { clip ->
-                            val isSelected = clip.id == uiState.selectedClipId
-                            Surface(
-                                modifier = Modifier
-                                    .width(135.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .border(
-                                        width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) OmkarGold else BorderDark,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { viewModel.selectClip(clip.id) },
-                                color = if (isSelected) OmkarGold.copy(alpha = 0.15f) else SurfaceDark
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = "Clip 0${clip.index}",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = if (isSelected) OmkarGold else Color.White
-                                        )
-                                        Text(
-                                            text = "${(clip.durationMs / 1000f)}s",
-                                            fontSize = 10.sp,
-                                            color = Color.Gray
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = clip.speechText.ifBlank { "Thought boundary" },
-                                        fontSize = 10.sp,
-                                        color = Color.LightGray,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.Diamond,
-                                            contentDescription = null,
-                                            tint = OmkarCyan,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = clip.motionPreset.displayName,
-                                            fontSize = 9.sp,
-                                            color = OmkarCyan,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Timeline Section
+                // 2. Interactive Multi-Layer Timeline View
                 TimelineView(
                     project = project,
                     currentPlayheadMs = playbackState.currentPositionMs,
                     selectedClipId = uiState.selectedClipId,
                     selectedSplitId = uiState.selectedSplitId,
-                    onSeek = { ms -> viewModel.previewEngine.seekTo(ms) },
+                    onSeek = { ms -> viewModel.seekTo(ms) },
                     onSelectClip = { clipId -> viewModel.selectClip(clipId) },
                     onSelectSplit = { splitId -> viewModel.selectSplit(splitId) },
                     onAddSplitAtPlayhead = { viewModel.addSplitAtPlayhead() },
                     onDeleteSplit = { splitId -> viewModel.deleteSplit(splitId) },
-                    onMoveSplit = { splitId, newMs -> viewModel.moveSplit(splitId, newMs) }
+                    onMoveSplit = { splitId, newMs -> viewModel.moveSplit(splitId, newMs) },
+                    onDeleteClip = { clipId -> viewModel.deleteClip(clipId) },
+                    onDuplicateClip = { clipId -> viewModel.duplicateClip(clipId) },
+                    onToggleClipMute = { clipId -> viewModel.toggleClipMute(clipId) },
+                    onOpenTextOverlayDialog = { viewModel.openTextOverlayDialog() }
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Clip Inspector (if clip selected)
-                val selectedClip = project.clips.firstOrNull { it.id == uiState.selectedClipId }
-                if (selectedClip != null) {
-                    ClipInspector(
-                        clip = selectedClip,
-                        onDismiss = { viewModel.selectClip(null) },
-                        onApplyPreset = { preset -> viewModel.setClipPreset(selectedClip.id, preset) },
-                        onUpdateKeyframe = { kfId, scale, posX, posY, rot, curve ->
-                            viewModel.updateKeyframe(selectedClip.id, kfId, scale, posX, posY, rot, curve)
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
+                // 3. Modern Bottom Editor Workspace Tabs (Edit, Keyframes, Audio, Text, Captions, Export)
+                TabRow(
+                    selectedTabIndex = uiState.currentTab.ordinal,
+                    containerColor = SurfaceDark,
+                    contentColor = OmkarGold,
+                    indicator = { tabPositions ->
+                        TabRowDefaults.SecondaryIndicator(
+                            Modifier.tabIndicatorOffset(tabPositions[uiState.currentTab.ordinal]),
+                            color = OmkarGold,
+                            height = 3.dp
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    EditorTab.values().forEach { tab ->
+                        Tab(
+                            selected = uiState.currentTab == tab,
+                            onClick = { viewModel.setEditorTab(tab) },
+                            text = {
+                                Text(
+                                    text = tab.title,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (uiState.currentTab == tab) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        )
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Workspace Tab Content
+                when (uiState.currentTab) {
+                    EditorTab.EDIT -> {
+                        EditToolsPanel(
+                            project = project,
+                            selectedClipId = uiState.selectedClipId,
+                            currentPlayheadMs = playbackState.currentPositionMs,
+                            onSplit = { viewModel.addSplitAtPlayhead() },
+                            onTrimStart = { clipId, ms -> viewModel.trimClipStart(clipId, ms) },
+                            onTrimEnd = { clipId, ms -> viewModel.trimClipEnd(clipId, ms) },
+                            onDelete = { clipId -> viewModel.deleteClip(clipId) },
+                            onDuplicate = { clipId -> viewModel.duplicateClip(clipId) }
+                        )
+                    }
+
+                    EditorTab.KEYFRAMES -> {
+                        val activeClip = project.clips.firstOrNull { it.id == uiState.selectedClipId }
+                            ?: project.clips.firstOrNull()
+
+                        if (activeClip != null) {
+                            ClipInspector(
+                                clip = activeClip,
+                                onDismiss = { viewModel.selectClip(null) },
+                                onApplyPreset = { preset -> viewModel.setClipPreset(activeClip.id, preset) },
+                                onUpdateKeyframe = { kfId, scale, posX, posY, rot, curve ->
+                                    viewModel.updateKeyframe(activeClip.id, kfId, scale, posX, posY, rot, curve)
+                                }
+                            )
+                        } else {
+                            Text(
+                                text = "Select a clip on the timeline to edit keyframes",
+                                color = Color.Gray,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                    }
+
+                    EditorTab.AUDIO -> {
+                        AudioToolsPanel(
+                            project = project,
+                            selectedClipId = uiState.selectedClipId,
+                            isMasterMuted = uiState.isMuted,
+                            onToggleMasterMute = { viewModel.toggleMute() },
+                            onToggleClipMute = { clipId -> viewModel.toggleClipMute(clipId) },
+                            onSetClipVolume = { clipId, vol -> viewModel.setClipVolume(clipId, vol) }
+                        )
+                    }
+
+                    EditorTab.TEXT -> {
+                        TextToolsPanel(
+                            project = project,
+                            onAddText = { viewModel.openTextOverlayDialog() },
+                            onEditText = { overlay -> viewModel.openTextOverlayDialog(overlay) },
+                            onDeleteText = { overlayId -> viewModel.deleteTextOverlay(overlayId) }
+                        )
+                    }
+
+                    EditorTab.CAPTIONS -> {
+                        CaptionsPanel(
+                            project = project,
+                            onSeekTo = { viewModel.seekTo(it) }
+                        )
+                    }
+
+                    EditorTab.EXPORT -> {
+                        ExportSettingsPanel(
+                            project = project,
+                            onOpenExport = { viewModel.openExportDialog() }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // SMART MODE Diagnostics Panel
                 if (uiState.currentMode == EditorMode.SMART) {
                     SmartModePanel(
                         project = project,
-                        onSeek = { ms -> viewModel.previewEngine.seekTo(ms) },
+                        onSeek = { ms -> viewModel.seekTo(ms) },
                         onDeleteSplit = { splitId -> viewModel.deleteSplit(splitId) }
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                 }
 
-                // Secondary change video button
+                // Choose Another Video
                 OutlinedButton(
                     onClick = {
                         videoPickerLauncher.launch(
@@ -410,7 +427,7 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
                 }
             }
 
-            // Analysis progress card
+            // Speech & Thought Analysis Overlay (During initial processing)
             if (uiState.isAnalyzing) {
                 Spacer(modifier = Modifier.height(12.dp))
                 ProcessingOverlay(
@@ -420,110 +437,379 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
                     isExport = false
                 )
             }
-
-            // Export progress card
-            if (uiState.isExporting) {
-                Spacer(modifier = Modifier.height(12.dp))
-                ProcessingOverlay(
-                    title = "Exporting Processed MP4 Video",
-                    statusText = uiState.exportStatus,
-                    progress = uiState.exportProgress,
-                    isExport = true
-                )
-            }
         }
     }
 
-    // Export Settings Dialog
+    // Export Settings Configuration Modal Dialog
     if (uiState.showExportDialog && uiState.project != null) {
         ExportDialog(
             initialSettings = uiState.project!!.exportSettings,
             onDismiss = { viewModel.dismissExportDialog() },
-            onConfirmExport = { settings ->
-                viewModel.updateExportSettings(settings)
+            onConfirmExport = { newSettings ->
+                viewModel.updateExportSettings(newSettings)
                 viewModel.startExport()
             }
         )
     }
 
-    // Export Success Dialog
-    if (uiState.showExportSuccessDialog && uiState.exportedFile != null) {
-        val file = uiState.exportedFile!!
-        val fileMb = String.format("%.2f", file.length() / (1024f * 1024f))
-
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissExportSuccessDialog() },
-            containerColor = SurfaceDark,
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = OmkarGreen,
-                        modifier = Modifier.size(26.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Export Complete (100%)", fontWeight = FontWeight.Bold, color = Color.White)
+    // Premium Real-time Hardware Export Progress Screen (Replaces slow frame-by-frame dialog)
+    ExportProgressScreen(
+        isExporting = uiState.isExporting,
+        progressUpdate = uiState.exportProgressUpdate,
+        exportedFile = uiState.exportedFile,
+        exportedUri = uiState.exportedUri,
+        isComplete = uiState.isExportComplete,
+        onCancel = { viewModel.cancelExport() },
+        onPlay = {
+            uiState.exportedUri?.let { uri ->
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "video/mp4")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Your automatic speech-split video with cinematic keyframes has been saved successfully as MP4 (H.264 / AAC).",
-                        fontSize = 13.sp,
-                        color = Color.LightGray
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = BackgroundDark
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text(text = "File: ${file.name}", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                            Text(text = "Size: $fileMb MB", fontSize = 11.sp, color = OmkarCyan)
-                            Text(text = "Location: ${file.parent}", fontSize = 10.sp, color = Color.Gray)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "video/mp4"
-                            putExtra(Intent.EXTRA_STREAM, uiState.exportedUri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Video"))
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = OmkarGold, contentColor = Color.Black)
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Share Video", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { viewModel.dismissExportSuccessDialog() }) {
-                    Text(text = "Close", color = Color.White)
-                }
+                context.startActivity(Intent.createChooser(intent, "Play Exported Video"))
             }
+        },
+        onShare = {
+            uiState.exportedUri?.let { uri ->
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "video/mp4"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "Share Exported MP4"))
+            }
+        },
+        onSave = {
+            // Already saved to Movies/OmkarVideos
+            viewModel.dismissExportComplete()
+        },
+        onEditAgain = {
+            viewModel.dismissExportComplete()
+        }
+    )
+
+    // Non-destructive Text Overlay Editor Modal
+    if (uiState.showTextOverlayDialog) {
+        TextOverlayDialog(
+            initialOverlay = uiState.editingTextOverlay,
+            defaultStartMs = playbackState.currentPositionMs,
+            defaultEndMs = (playbackState.currentPositionMs + 3000L).coerceAtMost(uiState.project?.effectiveDurationMs ?: 10000L),
+            onDismiss = { viewModel.dismissTextOverlayDialog() },
+            onSave = { overlay -> viewModel.saveTextOverlay(overlay) },
+            onDelete = { overlayId -> viewModel.deleteTextOverlay(overlayId) }
         )
     }
 }
 
 @Composable
-private fun InitialVideoSelectionView(
-    onPickVideo: () -> Unit,
+private fun EditToolsPanel(
+    project: com.example.model.VideoProject,
+    selectedClipId: String?,
+    currentPlayheadMs: Long,
+    onSplit: () -> Unit,
+    onTrimStart: (String, Long) -> Unit,
+    onTrimEnd: (String, Long) -> Unit,
+    onDelete: (String) -> Unit,
+    onDuplicate: (String) -> Unit
+) {
+    val activeClip = project.clips.firstOrNull { it.id == selectedClipId }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "Clip Editing Tools",
+                color = OmkarGold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ElevatedButton(
+                    onClick = onSplit,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.elevatedButtonColors(
+                        containerColor = SurfaceVariantDark,
+                        contentColor = OmkarGold
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Split", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                if (activeClip != null) {
+                    ElevatedButton(
+                        onClick = { onTrimStart(activeClip.id, currentPlayheadMs) },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.elevatedButtonColors(
+                            containerColor = SurfaceVariantDark,
+                            contentColor = OmkarCyan
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Trim Start", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    ElevatedButton(
+                        onClick = { onTrimEnd(activeClip.id, currentPlayheadMs) },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.elevatedButtonColors(
+                            containerColor = SurfaceVariantDark,
+                            contentColor = OmkarCyan
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Trim End", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioToolsPanel(
+    project: com.example.model.VideoProject,
+    selectedClipId: String?,
+    isMasterMuted: Boolean,
+    onToggleMasterMute: () -> Unit,
+    onToggleClipMute: (String) -> Unit,
+    onSetClipVolume: (String, Float) -> Unit
+) {
+    val activeClip = project.clips.firstOrNull { it.id == selectedClipId }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "Audio & Acoustic Controls",
+                color = OmkarCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Master Audio Mute Toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Master Video Sound", color = Color.White, fontSize = 12.sp)
+                ElevatedButton(
+                    onClick = onToggleMasterMute,
+                    colors = ButtonDefaults.elevatedButtonColors(
+                        containerColor = if (isMasterMuted) OmkarCutRed else SurfaceVariantDark,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(if (isMasterMuted) "Unmute Master" else "Mute Master", fontSize = 11.sp)
+                }
+            }
+
+            if (activeClip != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Clip #${activeClip.index} Volume", color = OmkarGold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Slider(
+                    value = activeClip.volume,
+                    onValueChange = { onSetClipVolume(activeClip.id, it) },
+                    valueRange = 0f..2f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = OmkarGold,
+                        activeTrackColor = OmkarGold
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextToolsPanel(
+    project: com.example.model.VideoProject,
+    onAddText: () -> Unit,
+    onEditText: (com.example.model.TextOverlay) -> Unit,
+    onDeleteText: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Text Overlays & Titles (${project.textOverlays.size})",
+                    color = OmkarGold,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                ElevatedButton(
+                    onClick = onAddText,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.elevatedButtonColors(
+                        containerColor = OmkarGold,
+                        contentColor = Color.Black
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Default.TextFields, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add Text", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (project.textOverlays.isEmpty()) {
+                Text(
+                    text = "No text overlays added yet. Tap 'Add Text' to overlay title or callout.",
+                    color = Color.Gray,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                project.textOverlays.forEach { overlay ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceVariantDark)
+                            .clickable { onEditText(overlay) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = overlay.text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(text = overlay.formattedTimeRange, color = OmkarCyan, fontSize = 10.sp)
+                        }
+                        IconButton(onClick = { onDeleteText(overlay.id) }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.ContentCut, contentDescription = "Delete", tint = OmkarCutRed, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CaptionsPanel(
+    project: com.example.model.VideoProject,
+    onSeekTo: (Long) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "Detected Spoken Thought Segments (${project.speechSegments.size})",
+                color = OmkarPurple,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            project.speechSegments.forEach { seg ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SurfaceVariantDark)
+                        .clickable { onSeekTo(seg.startMs) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = seg.text, color = Color.White, fontSize = 12.sp)
+                        Text(text = String.format("%.2fs - %.2fs", seg.startMs / 1000f, seg.endMs / 1000f), color = OmkarGold, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportSettingsPanel(
+    project: com.example.model.VideoProject,
+    onOpenExport: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = "Hardware-Accelerated Video Export",
+                color = OmkarGold,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "GPU MediaCodec encoding with real-time keyframe interpolation and lossless audio muxing.",
+                color = Color.LightGray,
+                fontSize = 11.sp
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Button(
+                onClick = onOpenExport,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = OmkarGold,
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .testTag("start_hardware_export_button")
+            ) {
+                Icon(Icons.Default.FileDownload, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "START HARDWARE EXPORT", fontWeight = FontWeight.ExtraBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoImportCard(
+    onImportClick: () -> Unit,
     onTrySampleVideo: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .border(1.dp, BorderDark, RoundedCornerShape(20.dp))
-            .testTag("initial_selection_card"),
+            .clip(RoundedCornerShape(18.dp))
+            .border(1.dp, BorderDark, RoundedCornerShape(18.dp)),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark)
     ) {
         Column(
@@ -535,10 +821,10 @@ private fun InitialVideoSelectionView(
             Surface(
                 shape = CircleShape,
                 color = OmkarGold.copy(alpha = 0.15f),
-                modifier = Modifier.size(72.dp)
+                modifier = Modifier.size(64.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.SmartDisplay,
+                    imageVector = Icons.Default.VideoLibrary,
                     contentDescription = null,
                     tint = OmkarGold,
                     modifier = Modifier.padding(16.dp)
@@ -548,94 +834,54 @@ private fun InitialVideoSelectionView(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "OMKAR AUTOMATIC VIDEO MAKER",
-                fontWeight = FontWeight.Black,
-                fontSize = 18.sp,
+                text = "Import Video to Begin",
                 color = Color.White,
-                textAlign = TextAlign.Center
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
             )
-
-            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Automatically detect natural spoken thoughts, split video without cutting words, apply smooth cinematic keyframes, and export real H.264 MP4.",
+                text = "Automatically detect speech boundaries, create intelligent cuts, and apply cinematic keyframes.",
+                color = Color.Gray,
                 fontSize = 12.sp,
-                color = Color.LightGray,
                 textAlign = TextAlign.Center,
-                lineHeight = 18.sp
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Primary Pick Button
-            ElevatedButton(
-                onClick = onPickVideo,
-                colors = ButtonDefaults.elevatedButtonColors(
+            Button(
+                onClick = onImportClick,
+                colors = ButtonDefaults.buttonColors(
                     containerColor = OmkarGold,
                     contentColor = Color.Black
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("select_video_button")
+                    .height(46.dp)
+                    .testTag("import_video_button")
             ) {
                 Icon(Icons.Default.VideoLibrary, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Select Video from Device", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(text = "Select Video from Device", fontWeight = FontWeight.Bold)
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Try Sample Video Button
             OutlinedButton(
                 onClick = onTrySampleVideo,
-                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = OmkarCyan),
+                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("try_sample_video_button")
+                    .height(44.dp)
+                    .testTag("sample_video_button")
             ) {
-                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = OmkarCyan)
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Try Sample Speech Video", color = OmkarCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(text = "Try Sample Speech Video", fontWeight = FontWeight.SemiBold)
             }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Feature Highlights
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(BackgroundDark)
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FeatureBadge("Semantic Speech Boundary", "Splits at completed thoughts, never slicing mid-word")
-                FeatureBadge("Subtle Cinematic Keyframes", "100% -> 112% smooth Ease-In-Out motion per clip")
-                FeatureBadge("Interactive Timeline", "Fine-tune splits, adjust zoom, tweak keyframe curves")
-                FeatureBadge("Hardware MP4 Export", "Real H.264 video with AAC audio synchronization")
-            }
-        }
-    }
-}
-
-@Composable
-private fun FeatureBadge(title: String, subtitle: String) {
-    Row(verticalAlignment = Alignment.Top) {
-        Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = null,
-            tint = OmkarGreen,
-            modifier = Modifier
-                .size(16.dp)
-                .padding(top = 2.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Column {
-            Text(text = title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text(text = subtitle, fontSize = 10.sp, color = Color.Gray)
         }
     }
 }

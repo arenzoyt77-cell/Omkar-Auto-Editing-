@@ -21,6 +21,9 @@ data class VideoProject(
     val speechSegments: List<SpeechSegment> = emptyList(),
     val splitPoints: List<SplitPoint> = emptyList(),
     val clips: List<ClipSegment> = emptyList(),
+    val textOverlays: List<TextOverlay> = emptyList(),
+    val masterVolume: Float = 1.0f,
+    val isMasterMuted: Boolean = false,
     val mode: EditorMode = EditorMode.SIMPLE,
     val exportSettings: ExportSettings = ExportSettings(),
     val audioAmplitudes: List<Float> = emptyList(),
@@ -28,7 +31,15 @@ data class VideoProject(
 ) {
     val totalClipsCount: Int get() = clips.size
     val totalSplitsCount: Int get() = splitPoints.size
+    val totalTextOverlaysCount: Int get() = textOverlays.size
     val aspectRatio: Float get() = if (height > 0) width.toFloat() / height.toFloat() else 16f / 9f
+
+    val effectiveDurationMs: Long
+        get() = if (clips.isNotEmpty()) clips.maxOf { it.endMs } else durationMs
+
+    fun findActiveTextOverlays(timestampMs: Long): List<TextOverlay> {
+        return textOverlays.filter { it.contains(timestampMs) }
+    }
 
     val formattedDuration: String
         get() {

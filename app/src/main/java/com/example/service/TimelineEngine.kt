@@ -173,6 +173,157 @@ object TimelineEngine {
     }
 
     /**
+     * Trims the start timestamp of a clip.
+     */
+    fun trimClipStart(
+        project: VideoProject,
+        clipId: String,
+        newStartMs: Long
+    ): VideoProject {
+        val targetClip = project.clips.firstOrNull { it.id == clipId } ?: return project
+        val clampedStart = newStartMs.coerceIn(0L, targetClip.endMs - 100L)
+        val updatedClips = project.clips.map { clip ->
+            if (clip.id == clipId) {
+                clip.copy(
+                    startMs = clampedStart,
+                    startKeyframe = clip.startKeyframe.copy(timestampMs = clampedStart)
+                )
+            } else clip
+        }
+        return project.copy(clips = updatedClips)
+    }
+
+    /**
+     * Trims the end timestamp of a clip.
+     */
+    fun trimClipEnd(
+        project: VideoProject,
+        clipId: String,
+        newEndMs: Long
+    ): VideoProject {
+        val targetClip = project.clips.firstOrNull { it.id == clipId } ?: return project
+        val clampedEnd = newEndMs.coerceIn(targetClip.startMs + 100L, project.durationMs)
+        val updatedClips = project.clips.map { clip ->
+            if (clip.id == clipId) {
+                clip.copy(
+                    endMs = clampedEnd,
+                    endKeyframe = clip.endKeyframe.copy(timestampMs = clampedEnd)
+                )
+            } else clip
+        }
+        return project.copy(clips = updatedClips)
+    }
+
+    /**
+     * Deletes a clip from the project.
+     */
+    fun deleteClip(
+        project: VideoProject,
+        clipId: String
+    ): VideoProject {
+        if (project.clips.size <= 1) return project // Keep at least one clip
+        val remainingClips = project.clips.filterNot { it.id == clipId }
+            .mapIndexed { idx, clip -> clip.copy(index = idx + 1) }
+        return project.copy(clips = remainingClips)
+    }
+
+    /**
+     * Duplicates a clip and inserts it immediately after.
+     */
+    fun duplicateClip(
+        project: VideoProject,
+        clipId: String
+    ): VideoProject {
+        val index = project.clips.indexOfFirst { it.id == clipId }
+        if (index == -1) return project
+        val clip = project.clips[index]
+        val duplicated = clip.copy(
+            id = UUID.randomUUID().toString(),
+            index = index + 2,
+            startKeyframe = clip.startKeyframe.copy(id = UUID.randomUUID().toString()),
+            endKeyframe = clip.endKeyframe.copy(id = UUID.randomUUID().toString())
+        )
+        val mutable = project.clips.toMutableList()
+        mutable.add(index + 1, duplicated)
+        val reindexed = mutable.mapIndexed { idx, c -> c.copy(index = idx + 1) }
+        return project.copy(clips = reindexed)
+    }
+
+    /**
+     * Reorders a clip by moving it from fromIndex to toIndex.
+     */
+    fun reorderClips(
+        project: VideoProject,
+        fromIndex: Int,
+        toIndex: Int
+    ): VideoProject {
+        if (fromIndex !in project.clips.indices || toIndex !in project.clips.indices) return project
+        val mutable = project.clips.toMutableList()
+        val item = mutable.removeAt(fromIndex)
+        mutable.add(toIndex, item)
+        val reindexed = mutable.mapIndexed { idx, c -> c.copy(index = idx + 1) }
+        return project.copy(clips = reindexed)
+    }
+
+    /**
+     * Sets mute status for a clip.
+     */
+    fun setClipMuted(
+        project: VideoProject,
+        clipId: String,
+        isMuted: Boolean
+    ): VideoProject {
+        val updated = project.clips.map {
+            if (it.id == clipId) it.copy(isMuted = isMuted) else it
+        }
+        return project.copy(clips = updated)
+    }
+
+    /**
+     * Sets audio volume for a clip (0.0f - 2.0f).
+     */
+    fun setClipVolume(
+        project: VideoProject,
+        clipId: String,
+        volume: Float
+    ): VideoProject {
+        val clamped = volume.coerceIn(0f, 2f)
+        val updated = project.clips.map {
+            if (it.id == clipId) it.copy(volume = clamped) else it
+        }
+        return project.copy(clips = updated)
+    }
+
+    /**
+     * Text Overlay operations
+     */
+    fun addTextOverlay(
+        project: VideoProject,
+        overlay: com.example.model.TextOverlay
+    ): VideoProject {
+        val updated = (project.textOverlays + overlay).sortedBy { it.startMs }
+        return project.copy(textOverlays = updated)
+    }
+
+    fun updateTextOverlay(
+        project: VideoProject,
+        overlay: com.example.model.TextOverlay
+    ): VideoProject {
+        val updated = project.textOverlays.map {
+            if (it.id == overlay.id) overlay else it
+        }.sortedBy { it.startMs }
+        return project.copy(textOverlays = updated)
+    }
+
+    fun deleteTextOverlay(
+        project: VideoProject,
+        overlayId: String
+    ): VideoProject {
+        val updated = project.textOverlays.filterNot { it.id == overlayId }
+        return project.copy(textOverlays = updated)
+    }
+
+    /**
      * Finds which clip covers the current playhead position.
      */
     fun findActiveClip(clips: List<ClipSegment>, playheadMs: Long): ClipSegment? {
