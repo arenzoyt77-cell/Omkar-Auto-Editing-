@@ -184,19 +184,27 @@ fun ReferenceMotionPanel(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = summary.referenceName,
+                        text = referenceMetadata?.fileName ?: summary.referenceName,
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
                     Text(
-                        text = "Duration: ${(summary.referenceDurationMs / 1000f)}s • ${summary.totalEventsCount} Events",
+                        text = if (referenceMetadata != null) {
+                            "Duration: ${referenceMetadata.formattedDuration} • Size: ${referenceMetadata.formattedSize}"
+                        } else {
+                            "Duration: ${String.format("%.1fs", summary.referenceDurationMs / 1000f)} • ${summary.totalEventsCount} Events"
+                        },
                         color = OmkarGold,
                         fontSize = 10.sp
                     )
                     Text(
-                        text = "Zoom Range: ${(summary.minScale * 100).toInt()}% → ${(summary.maxScale * 100).toInt()}%",
+                        text = if (referenceMetadata != null) {
+                            "Resolution: ${referenceMetadata.formattedResolution} • Zoom: ${(summary.minScale * 100).toInt()}%→${(summary.maxScale * 100).toInt()}%"
+                        } else {
+                            "Zoom: ${(summary.minScale * 100).toInt()}% → ${(summary.maxScale * 100).toInt()}% • X/Y Pan Active"
+                        },
                         color = Color.LightGray,
                         fontSize = 10.sp
                     )

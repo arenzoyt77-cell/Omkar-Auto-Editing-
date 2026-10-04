@@ -7,6 +7,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -249,9 +251,9 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
             val project = uiState.project
 
             // Importing video feedback banner
-            if (uiState.isImportingVideo) {
+            if (uiState.isImportingVideo || uiState.isAnalyzingReference) {
                 ImportLoadingBanner(
-                    statusText = uiState.importStatus,
+                    statusText = if (uiState.isAnalyzingReference) "Analyzing reference video & caching Motion Blueprint..." else uiState.importStatus,
                     onCancel = { viewModel.cancelImport() }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -260,6 +262,8 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
             if (project == null) {
                 // Initial State: Prompt User to Import Video or Use Speech Test Video
                 VideoImportCard(
+                    referenceMetadata = uiState.referenceVideoMetadata,
+                    blueprintSummary = uiState.motionBlueprintSummary,
                     onImportClick = {
                         videoPickerLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
@@ -358,99 +362,111 @@ fun MainScreen(viewModel: VideoProcessingViewModel) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Workspace Tab Content
-                when (uiState.currentTab) {
-                    EditorTab.EDIT -> {
-                        EditToolsPanel(
-                            project = project,
-                            selectedClipId = uiState.selectedClipId,
-                            currentPlayheadMs = playbackState.currentPositionMs,
-                            onSplit = { viewModel.addSplitAtPlayhead() },
-                            onTrimStart = { clipId, ms -> viewModel.trimClipStart(clipId, ms) },
-                            onTrimEnd = { clipId, ms -> viewModel.trimClipEnd(clipId, ms) },
-                            onDelete = { clipId -> viewModel.deleteClip(clipId) },
-                            onDuplicate = { clipId -> viewModel.duplicateClip(clipId) }
-                        )
-                    }
-
-                    EditorTab.KEYFRAMES -> {
-                        val activeClip = project.clips.firstOrNull { it.id == uiState.selectedClipId }
-                            ?: project.clips.firstOrNull()
-
-                        if (activeClip != null) {
-                            ClipInspector(
-                                clip = activeClip,
-                                onDismiss = { viewModel.selectClip(null) },
-                                onApplyPreset = { preset -> viewModel.setClipPreset(activeClip.id, preset) },
-                                onUpdateKeyframe = { kfId, scale, posX, posY, rot, curve ->
-                                    viewModel.updateKeyframe(activeClip.id, kfId, scale, posX, posY, rot, curve)
-                                },
-                                onAddKeyframe = { scale, posX, posY, curve ->
-                                    viewModel.addKeyframeAtPlayhead(activeClip.id, scale, posX, posY, curve)
-                                },
-                                onDeleteKeyframe = { kfId ->
-                                    viewModel.deleteKeyframe(activeClip.id, kfId)
-                                }
-                            )
-                        } else {
-                            Text(
-                                text = "Select a clip on the timeline to edit keyframes",
-                                color = Color.Gray,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(16.dp)
+                // Workspace Tab Content with smooth non-blocking Crossfade transition
+                Crossfade(
+                    targetState = uiState.currentTab,
+                    animationSpec = tween(durationMillis = 160),
+                    label = "EditorTabCrossfade"
+                ) { activeTab ->
+                    when (activeTab) {
+                        EditorTab.EDIT -> {
+                            EditToolsPanel(
+                                project = project,
+                                selectedClipId = uiState.selectedClipId,
+                                currentPlayheadMs = playbackState.currentPositionMs,
+                                onSplit = { viewModel.addSplitAtPlayhead() },
+                                onTrimStart = { clipId, ms -> viewModel.trimClipStart(clipId, ms) },
+                                onTrimEnd = { clipId, ms -> viewModel.trimClipEnd(clipId, ms) },
+                                onDelete = { clipId -> viewModel.deleteClip(clipId) },
+                                onDuplicate = { clipId -> viewModel.duplicateClip(clipId) }
                             )
                         }
-                    }
 
-                    EditorTab.REFERENCE -> {
-                        ReferenceMotionPanel(
-                            summary = uiState.motionBlueprintSummary,
-                            referenceMetadata = uiState.referenceVideoMetadata,
-                            currentMotionMode = uiState.currentMotionMode,
-                            isAnalyzingReference = uiState.isAnalyzingReference,
-                            onSelectReferenceVideo = {
-                                referencePickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                        EditorTab.KEYFRAMES -> {
+                            val activeClip = project.clips.firstOrNull { it.id == uiState.selectedClipId }
+                                ?: project.clips.firstOrNull()
+
+                            if (activeClip != null) {
+                                ClipInspector(
+                                    clip = activeClip,
+                                    onDismiss = { viewModel.selectClip(null) },
+                                    onApplyPreset = { preset -> viewModel.setClipPreset(activeClip.id, preset) },
+                                    onUpdateKeyframe = { kfId, scale, posX, posY, rot, curve ->
+                                        viewModel.updateKeyframe(activeClip.id, kfId, scale, posX, posY, rot, curve)
+                                    },
+                                    onMoveKeyframe = { kfId, newTimestampMs ->
+                                        viewModel.updateKeyframe(activeClip.id, kfId, timestampMs = newTimestampMs)
+                                    },
+                                    onSeekToKeyframe = { timestampMs ->
+                                        viewModel.seekTo(timestampMs)
+                                    },
+                                    onAddKeyframe = { scale, posX, posY, curve ->
+                                        viewModel.addKeyframeAtPlayhead(activeClip.id, scale, posX, posY, curve)
+                                    },
+                                    onDeleteKeyframe = { kfId ->
+                                        viewModel.deleteKeyframe(activeClip.id, kfId)
+                                    }
                                 )
-                            },
-                            onResetToDefaultReference = { viewModel.useDefaultAuthoritativeReference() },
-                            onSetMotionMode = { mode -> viewModel.setMotionMode(mode) },
-                            onReapplyMotion = { viewModel.regenerateMotion() }
-                        )
-                    }
+                            } else {
+                                Text(
+                                    text = "Select a clip on the timeline to edit keyframes",
+                                    color = Color.Gray,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                        }
 
-                    EditorTab.AUDIO -> {
-                        AudioToolsPanel(
-                            project = project,
-                            selectedClipId = uiState.selectedClipId,
-                            isMasterMuted = uiState.isMuted,
-                            onToggleMasterMute = { viewModel.toggleMute() },
-                            onToggleClipMute = { clipId -> viewModel.toggleClipMute(clipId) },
-                            onSetClipVolume = { clipId, vol -> viewModel.setClipVolume(clipId, vol) }
-                        )
-                    }
+                        EditorTab.REFERENCE -> {
+                            ReferenceMotionPanel(
+                                summary = uiState.motionBlueprintSummary,
+                                referenceMetadata = uiState.referenceVideoMetadata,
+                                currentMotionMode = uiState.currentMotionMode,
+                                isAnalyzingReference = uiState.isAnalyzingReference,
+                                onSelectReferenceVideo = {
+                                    referencePickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                                    )
+                                },
+                                onResetToDefaultReference = { viewModel.useDefaultAuthoritativeReference() },
+                                onSetMotionMode = { mode -> viewModel.setMotionMode(mode) },
+                                onReapplyMotion = { viewModel.regenerateMotion() }
+                            )
+                        }
 
-                    EditorTab.TEXT -> {
-                        TextToolsPanel(
-                            project = project,
-                            onAddText = { viewModel.openTextOverlayDialog() },
-                            onEditText = { overlay -> viewModel.openTextOverlayDialog(overlay) },
-                            onDeleteText = { overlayId -> viewModel.deleteTextOverlay(overlayId) }
-                        )
-                    }
+                        EditorTab.AUDIO -> {
+                            AudioToolsPanel(
+                                project = project,
+                                selectedClipId = uiState.selectedClipId,
+                                isMasterMuted = uiState.isMuted,
+                                onToggleMasterMute = { viewModel.toggleMute() },
+                                onToggleClipMute = { clipId -> viewModel.toggleClipMute(clipId) },
+                                onSetClipVolume = { clipId, vol -> viewModel.setClipVolume(clipId, vol) }
+                            )
+                        }
 
-                    EditorTab.CAPTIONS -> {
-                        CaptionsPanel(
-                            project = project,
-                            onSeekTo = { viewModel.seekTo(it) }
-                        )
-                    }
+                        EditorTab.TEXT -> {
+                            TextToolsPanel(
+                                project = project,
+                                onAddText = { viewModel.openTextOverlayDialog() },
+                                onEditText = { overlay -> viewModel.openTextOverlayDialog(overlay) },
+                                onDeleteText = { overlayId -> viewModel.deleteTextOverlay(overlayId) }
+                            )
+                        }
 
-                    EditorTab.EXPORT -> {
-                        ExportSettingsPanel(
-                            project = project,
-                            onOpenExport = { viewModel.openExportDialog() }
-                        )
+                        EditorTab.CAPTIONS -> {
+                            CaptionsPanel(
+                                project = project,
+                                onSeekTo = { viewModel.seekTo(it) }
+                            )
+                        }
+
+                        EditorTab.EXPORT -> {
+                            ExportSettingsPanel(
+                                project = project,
+                                onOpenExport = { viewModel.openExportDialog() }
+                            )
+                        }
                     }
                 }
 
@@ -1000,6 +1016,8 @@ private fun SmartModePanel(
 
 @Composable
 private fun VideoImportCard(
+    referenceMetadata: com.example.model.VideoMetadata? = null,
+    blueprintSummary: com.example.model.BlueprintDebugSummary? = null,
     onImportClick: () -> Unit,
     onTrySampleVideo: () -> Unit,
     onSelectReferenceVideo: () -> Unit
@@ -1096,6 +1114,38 @@ private fun VideoImportCard(
                 Icon(Icons.Default.Transform, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(text = "Select Reference Video from Device", fontSize = 11.sp)
+            }
+
+            if (referenceMetadata != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = SurfaceVariantDark,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Reference Loaded: ${referenceMetadata.fileName}",
+                            color = OmkarGold,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${referenceMetadata.formattedDuration} • ${referenceMetadata.formattedResolution} • ${referenceMetadata.formattedSize}",
+                            color = OmkarCyan,
+                            fontSize = 10.sp
+                        )
+                        if (blueprintSummary != null) {
+                            Text(
+                                text = "Motion Blueprint Cached (${blueprintSummary.totalEventsCount} events, ${(blueprintSummary.minScale * 100).toInt()}%→${(blueprintSummary.maxScale * 100).toInt()}%)",
+                                color = Color.LightGray,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }

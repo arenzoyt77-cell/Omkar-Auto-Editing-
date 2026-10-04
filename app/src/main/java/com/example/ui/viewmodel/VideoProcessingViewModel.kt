@@ -68,7 +68,7 @@ data class VideoProcessingUiState(
     val analysisProgress: Float = 0f,
     val analysisStatus: String = "",
     val analysisStep: Int = 0,
-    val totalAnalysisSteps: Int = 5,
+    val totalAnalysisSteps: Int = 6,
     val isAnalyzingReference: Boolean = false,
     val isExporting: Boolean = false,
     val exportProgressUpdate: ExportProgressUpdate = ExportProgressUpdate(0f, 0, 0, 0L, 0L, 0f, 0, ""),
@@ -106,7 +106,7 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
 
     // Media3 Core Components
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(application)
-        .setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        .setSeekParameters(SeekParameters.EXACT)
         .build()
 
     // Domain Services
@@ -118,6 +118,8 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     // Non-destructive Undo / Redo Stacks
     private val undoStack = mutableListOf<VideoProject>()
     private val redoStack = mutableListOf<VideoProject>()
+    private var lastUndoSaveTimeMs: Long = 0L
+    private var lastPlayerSeekTimeMs: Long = 0L
 
     // State Flows
     private val _uiState = MutableStateFlow(VideoProcessingUiState())
@@ -177,7 +179,12 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
         })
     }
 
-    private fun saveStateForUndo() {
+    private fun saveStateForUndo(throttled: Boolean = false) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (throttled && (now - lastUndoSaveTimeMs) < 450L) {
+            return
+        }
+        lastUndoSaveTimeMs = now
         val current = _uiState.value.project ?: return
         undoStack.add(current)
         if (undoStack.size > 30) undoStack.removeAt(0)
@@ -326,6 +333,7 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
      * Reverts to the built-in authoritative reference target (YouCut_20261001_194357373.mp4).
      */
     fun useDefaultAuthoritativeReference() {
+        ReferenceMotionCache.resetToAuthoritativeReference()
         _uiState.value = _uiState.value.copy(
             referenceVideoMetadata = null,
             motionBlueprintSummary = com.example.model.AuthoritativeReferenceBlueprint.debugSummary
@@ -384,9 +392,9 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                 _uiState.value = _uiState.value.copy(
                     isAnalyzing = true,
                     analysisStep = 1,
-                    totalAnalysisSteps = 5,
+                    totalAnalysisSteps = 6,
                     analysisProgress = 0.05f,
-                    analysisStatus = "Step 1/5: Extracting audio track & calculating waveform...",
+                    analysisStatus = "Step 1/6: Analyzing video & extracting audio waveform...",
                     errorMessage = null
                 )
 
@@ -400,7 +408,7 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                         else -> 3
                     }
                     _uiState.value = _uiState.value.copy(
-                        analysisProgress = progress,
+                        analysisProgress = (progress * 0.72f).coerceIn(0.05f, 0.72f),
                         analysisStatus = status,
                         analysisStep = step
                     )
@@ -408,15 +416,15 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
 
                 _uiState.value = _uiState.value.copy(
                     analysisStep = 4,
-                    analysisProgress = 0.80f,
-                    analysisStatus = "Step 4/5: Aligning reference motion blueprint..."
+                    analysisProgress = 0.78f,
+                    analysisStatus = "Step 4/6: Analyzing & aligning cached reference motion blueprint..."
                 )
-                delay(120)
+                delay(90)
 
                 _uiState.value = _uiState.value.copy(
                     analysisStep = 5,
-                    analysisProgress = 0.92f,
-                    analysisStatus = "Step 5/5: Synthesizing multi-keyframes & discrete frame cuts..."
+                    analysisProgress = 0.88f,
+                    analysisStatus = "Step 5/6: Generating multi-keyframes & discrete frame cuts..."
                 )
 
                 val (splits, clips) = segmentationService.generateSegmentation(
@@ -426,6 +434,13 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                     audioAmplitudes = audioResult.amplitudes,
                     motionMode = _uiState.value.currentMotionMode
                 )
+
+                _uiState.value = _uiState.value.copy(
+                    analysisStep = 6,
+                    analysisProgress = 0.96f,
+                    analysisStatus = "Step 6/6: Preparing real-time preview pipeline..."
+                )
+                delay(70)
 
                 val updatedProject = currentProj.copy(
                     speechSegments = audioResult.speechSegments,
@@ -440,7 +455,7 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
                     project = updatedProject,
                     isAnalyzing = false,
                     analysisProgress = 1.0f,
-                    analysisStep = 5,
+                    analysisStep = 6,
                     selectedClipId = clips.firstOrNull()?.id,
                     analysisStatus = "Analysis Complete"
                 )
@@ -495,8 +510,16 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     fun seekTo(positionMs: Long) {
         val maxDuration = _uiState.value.project?.effectiveDurationMs ?: exoPlayer.duration
         val clamped = positionMs.coerceIn(0L, maxDuration.coerceAtLeast(0L))
-        exoPlayer.seekTo(clamped)
+        // Immediately update UI playhead & keyframe interpolation state for zero-latency scrubbing
         updateCurrentTimelineState(clamped)
+
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!exoPlayer.isPlaying && (now - lastPlayerSeekTimeMs) >= 28L || clamped == 0L || clamped == maxDuration) {
+            lastPlayerSeekTimeMs = now
+            exoPlayer.seekTo(clamped)
+        } else if (exoPlayer.isPlaying) {
+            exoPlayer.seekTo(clamped)
+        }
     }
 
     fun toggleMute() {
@@ -527,6 +550,28 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
     private fun updateCurrentTimelineState(currentMs: Long) {
         val project = _uiState.value.project ?: return
         val activeClip = TimelineEngine.findActiveClip(project.clips, currentMs)
+
+        // Enforce clip boundaries and per-clip mute/volume during preview playback
+        if (exoPlayer.isPlaying && project.clips.isNotEmpty()) {
+            val strictlyInsideClip = project.clips.firstOrNull { currentMs in it.startMs..it.endMs }
+            if (strictlyInsideClip == null) {
+                val nextClip = project.clips.firstOrNull { it.startMs > currentMs }
+                if (nextClip != null) {
+                    exoPlayer.seekTo(nextClip.startMs)
+                } else {
+                    exoPlayer.pause()
+                }
+            }
+        }
+
+        val targetVolume = if (_uiState.value.isMuted || activeClip?.isMuted == true) {
+            0f
+        } else {
+            (activeClip?.volume ?: 1.0f).coerceIn(0f, 1f)
+        }
+        if (kotlin.math.abs(exoPlayer.volume - targetVolume) > 0.01f) {
+            exoPlayer.volume = targetVolume
+        }
 
         val transform = if (activeClip != null) {
             MotionInterpolationEngine.interpolateAt(activeClip, currentMs)
@@ -665,10 +710,11 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
         positionX: Float? = null,
         positionY: Float? = null,
         rotation: Float? = null,
-        easing: MotionCurve? = null
+        easing: MotionCurve? = null,
+        timestampMs: Long? = null
     ) {
         val project = _uiState.value.project ?: return
-        saveStateForUndo()
+        saveStateForUndo(throttled = true)
         val updated = TimelineEngine.updateClipKeyframe(
             project = project,
             clipId = clipId,
@@ -677,10 +723,19 @@ open class VideoProcessingViewModel(application: Application) : AndroidViewModel
             positionX = positionX,
             positionY = positionY,
             rotation = rotation,
-            easing = easing
+            easing = easing,
+            timestampMs = timestampMs
         )
         _uiState.value = _uiState.value.copy(project = updated)
-        updateCurrentTimelineState(exoPlayer.currentPosition)
+
+        // Reflect keyframe changes immediately in preview without rebuilding video
+        val editedClip = updated.clips.firstOrNull { it.id == clipId }
+        val editedKf = editedClip?.keyframeById(keyframeId)
+        if (!exoPlayer.isPlaying && editedKf != null) {
+            seekTo(editedKf.timestampMs)
+        } else {
+            updateCurrentTimelineState(exoPlayer.currentPosition)
+        }
     }
 
     fun setClipPreset(clipId: String, preset: MotionPreset) {

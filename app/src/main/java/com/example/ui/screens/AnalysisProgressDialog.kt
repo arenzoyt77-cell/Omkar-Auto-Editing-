@@ -74,20 +74,20 @@ fun AnalysisProgressDialog(
     progress: Float,
     statusText: String,
     currentStep: Int,
-    totalSteps: Int = 5,
+    totalSteps: Int = 6,
     onCancel: () -> Unit
 ) {
     val steps = listOf(
         AnalysisStepInfo(
             stepIndex = 1,
-            title = "Analyzing Video & Audio Track",
+            title = "Analyzing Video",
             description = "Extracting audio channel data & acoustic waveform amplitudes",
             icon = Icons.Default.GraphicEq,
             accentColor = OmkarCyan
         ),
         AnalysisStepInfo(
             stepIndex = 2,
-            title = "Detecting Speech & Thoughts",
+            title = "Detecting Speech",
             description = "Identifying natural pauses, utterances, and completed sentences",
             icon = Icons.Default.RecordVoiceOver,
             accentColor = OmkarPurple
@@ -108,10 +108,17 @@ fun AnalysisProgressDialog(
         ),
         AnalysisStepInfo(
             stepIndex = 5,
-            title = "Generating Multi-Keyframes & Cuts",
+            title = "Generating Keyframes",
             description = "Snapping cuts to discrete video frames & calculating easing curves",
             icon = Icons.Default.AutoAwesome,
             accentColor = OmkarGreen
+        ),
+        AnalysisStepInfo(
+            stepIndex = 6,
+            title = "Preparing Preview",
+            description = "Synchronizing real-time multi-keyframe playback pipeline",
+            icon = Icons.Default.Movie,
+            accentColor = OmkarGold
         )
     )
 
@@ -276,21 +283,53 @@ fun AnalysisProgressDialog(
                             Spacer(modifier = Modifier.width(10.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = step.title,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                                    color = when {
-                                        isDone -> Color.White
-                                        isCurrent -> step.accentColor
-                                        else -> Color.Gray
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = step.title,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                        color = when {
+                                            isDone -> Color.White
+                                            isCurrent -> step.accentColor
+                                            else -> Color.Gray
+                                        }
+                                    )
+                                    val stepProgress = when {
+                                        isDone -> 1.0f
+                                        isCurrent -> ((progress * totalSteps) - (step.stepIndex - 1)).coerceIn(0.15f, 0.95f)
+                                        else -> 0.0f
                                     }
-                                )
+                                    Text(
+                                        text = "${(stepProgress * 100).toInt()}%",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDone) OmkarGreen else if (isCurrent) step.accentColor else Color.DarkGray
+                                    )
+                                }
                                 Text(
                                     text = step.description,
                                     fontSize = 9.sp,
                                     color = if (isCurrent) Color.LightGray else Color(0xFF64748B),
                                     maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                val stepBarProgress = when {
+                                    isDone -> 1.0f
+                                    isCurrent -> ((progress * totalSteps) - (step.stepIndex - 1)).coerceIn(0.15f, 0.95f)
+                                    else -> 0.0f
+                                }
+                                LinearProgressIndicator(
+                                    progress = { stepBarProgress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(3.dp)
+                                        .clip(RoundedCornerShape(2.dp)),
+                                    color = if (isDone) OmkarGreen else step.accentColor,
+                                    trackColor = SurfaceDark
                                 )
                             }
                         }

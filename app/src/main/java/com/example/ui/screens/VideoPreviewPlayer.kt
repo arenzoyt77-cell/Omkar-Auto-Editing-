@@ -212,7 +212,7 @@ fun VideoPreviewPlayer(
                     )
                     Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = "Zoom: ${(transform.scale * 100).toInt()}% • Rot: ${transform.rotation.toInt()}°",
+                        text = "Zoom: ${(transform.scale * 100).toInt()}% • X:${String.format("%+.1f%%", transform.positionX)} Y:${String.format("%+.1f%%", transform.positionY)}",
                         color = OmkarGold,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium

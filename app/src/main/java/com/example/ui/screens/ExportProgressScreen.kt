@@ -227,7 +227,39 @@ fun ExportProgressScreen(
                             strokeCap = StrokeCap.Round
                         )
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 5-Stage Pipeline Stepper: Preparing -> Rendering -> Encoding -> Finalizing -> Saving
+                        val exportStages = listOf("Preparing", "Rendering", "Encoding", "Finalizing", "Saving")
+                        val activeStageIdx = when {
+                            animatedProgress < 0.05f -> 0
+                            animatedProgress < 0.45f -> 1
+                            animatedProgress < 0.88f -> 2
+                            animatedProgress < 0.96f -> 3
+                            else -> 4
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            exportStages.forEachIndexed { idx, label ->
+                                val isDoneStage = idx < activeStageIdx
+                                val isActiveStage = idx == activeStageIdx
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isActiveStage) FontWeight.ExtraBold else FontWeight.Medium,
+                                    color = when {
+                                        isDoneStage -> OmkarGreen
+                                        isActiveStage -> OmkarGold
+                                        else -> Color.Gray
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
 
                         // Metrics Grid: Frame & Time
                         Row(

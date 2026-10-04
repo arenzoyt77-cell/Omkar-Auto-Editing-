@@ -186,7 +186,8 @@ object TimelineEngine {
         positionX: Float? = null,
         positionY: Float? = null,
         rotation: Float? = null,
-        easing: MotionCurve? = null
+        easing: MotionCurve? = null,
+        timestampMs: Long? = null
     ): VideoProject {
         val updatedClips = project.clips.map { clip ->
             if (clip.id == clipId) {
@@ -197,7 +198,8 @@ object TimelineEngine {
                     positionX = positionX,
                     positionY = positionY,
                     rotation = rotation,
-                    easing = easing
+                    easing = easing,
+                    timestampMs = timestampMs
                 )
             } else clip
         }

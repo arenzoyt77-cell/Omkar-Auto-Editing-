@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -81,11 +82,14 @@ fun ClipInspector(
     onRegenerateMotion: (() -> Unit)? = null,
     onAddKeyframeAtPlayhead: (() -> Unit)? = null,
     onAddKeyframe: ((scale: Float, posX: Float, posY: Float, curve: MotionCurve) -> Unit)? = null,
-    onDeleteKeyframe: ((String) -> Unit)? = null
+    onDeleteKeyframe: ((String) -> Unit)? = null,
+    onMoveKeyframe: ((keyframeId: String, newTimestampMs: Long) -> Unit)? = null,
+    onSeekToKeyframe: ((Long) -> Unit)? = null
 ) {
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .animateContentSize()
             .clip(RoundedCornerShape(16.dp))
             .border(1.dp, OmkarGold.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             .testTag("clip_inspector_card"),
@@ -267,10 +271,11 @@ fun ClipInspector(
 
             // 1. Start Keyframe Control
             KeyframeControlItem(
-                title = "Start Keyframe (${clip.startMs / 1000f}s)",
+                title = "Start Keyframe (${String.format("%.2fs", clip.startMs / 1000f)})",
                 keyframe = clip.startKeyframe,
                 color = OmkarGold,
-                onUpdate = onUpdateKeyframe
+                onUpdate = onUpdateKeyframe,
+                onSeekToKeyframe = onSeekToKeyframe
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -278,21 +283,26 @@ fun ClipInspector(
             // 2. Intermediate Keyframes (if any exist)
             clip.intermediateKeyframes.forEachIndexed { idx, intermediate ->
                 KeyframeControlItem(
-                    title = "Keyframe #${idx + 2} (${intermediate.timestampMs / 1000f}s)",
+                    title = "Keyframe #${idx + 2} (${String.format("%.2fs", intermediate.timestampMs / 1000f)})",
                     keyframe = intermediate,
                     color = OmkarPurple,
                     onUpdate = onUpdateKeyframe,
-                    onDelete = onDeleteKeyframe
+                    onDelete = onDeleteKeyframe,
+                    minTimestampMs = (clip.startMs + 40L).coerceAtMost(clip.endMs),
+                    maxTimestampMs = (clip.endMs - 40L).coerceAtLeast(clip.startMs),
+                    onMoveKeyframe = onMoveKeyframe,
+                    onSeekToKeyframe = onSeekToKeyframe
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
             // 3. End Keyframe Control
             KeyframeControlItem(
-                title = "End Keyframe (${clip.endMs / 1000f}s)",
+                title = "End Keyframe (${String.format("%.2fs", clip.endMs / 1000f)})",
                 keyframe = clip.endKeyframe,
                 color = OmkarCyan,
-                onUpdate = onUpdateKeyframe
+                onUpdate = onUpdateKeyframe,
+                onSeekToKeyframe = onSeekToKeyframe
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -331,7 +341,11 @@ private fun KeyframeControlItem(
     keyframe: Keyframe,
     color: Color,
     onUpdate: (keyframeId: String, scale: Float?, posX: Float?, posY: Float?, rot: Float?, curve: MotionCurve?) -> Unit,
-    onDelete: ((String) -> Unit)? = null
+    onDelete: ((String) -> Unit)? = null,
+    minTimestampMs: Long? = null,
+    maxTimestampMs: Long? = null,
+    onMoveKeyframe: ((String, Long) -> Unit)? = null,
+    onSeekToKeyframe: ((Long) -> Unit)? = null
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -340,7 +354,11 @@ private fun KeyframeControlItem(
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = onSeekToKeyframe != null) {
+                        onSeekToKeyframe?.invoke(keyframe.timestampMs)
+                    },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -375,6 +393,22 @@ private fun KeyframeControlItem(
                         }
                     }
                 }
+            }
+
+            // Move Keyframe Time Slider (for intermediate keyframes)
+            if (onMoveKeyframe != null && minTimestampMs != null && maxTimestampMs != null && maxTimestampMs > minTimestampMs) {
+                Text(
+                    text = "Move Keyframe Time: ${String.format("%.2fs", keyframe.timestampMs / 1000f)}",
+                    fontSize = 10.sp,
+                    color = Color.Gray
+                )
+                Slider(
+                    value = keyframe.timestampMs.toFloat().coerceIn(minTimestampMs.toFloat(), maxTimestampMs.toFloat()),
+                    onValueChange = { onMoveKeyframe(keyframe.id, it.toLong()) },
+                    valueRange = minTimestampMs.toFloat()..maxTimestampMs.toFloat(),
+                    colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color),
+                    modifier = Modifier.height(24.dp)
+                )
             }
 
             // Scale Slider

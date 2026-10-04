@@ -25,10 +25,35 @@ object ReferenceMotionCache {
     private val blueprintCache = ConcurrentHashMap<String, List<MotionEvent>>()
     private val summaryCache = ConcurrentHashMap<String, BlueprintDebugSummary>()
 
+    @Volatile
+    var activeReferenceKey: String = AuthoritativeReferenceBlueprint.REFERENCE_NAME
+        private set
+
     init {
         // Pre-populate with Authoritative Reference Blueprint
         blueprintCache[AuthoritativeReferenceBlueprint.REFERENCE_NAME] = AuthoritativeReferenceBlueprint.events
         summaryCache[AuthoritativeReferenceBlueprint.REFERENCE_NAME] = AuthoritativeReferenceBlueprint.debugSummary
+    }
+
+    /**
+     * Resets active reference back to the authoritative YouCut blueprint.
+     */
+    fun resetToAuthoritativeReference() {
+        activeReferenceKey = AuthoritativeReferenceBlueprint.REFERENCE_NAME
+    }
+
+    /**
+     * Returns the currently active reference motion events (either custom cached or authoritative).
+     */
+    fun getActiveEvents(): List<MotionEvent> {
+        return blueprintCache[activeReferenceKey] ?: AuthoritativeReferenceBlueprint.events
+    }
+
+    /**
+     * Returns the currently active reference blueprint summary.
+     */
+    fun getActiveSummary(): BlueprintDebugSummary {
+        return summaryCache[activeReferenceKey] ?: AuthoritativeReferenceBlueprint.debugSummary
     }
 
     /**
@@ -56,9 +81,15 @@ object ReferenceMotionCache {
         referenceName: String,
         onProgress: (Float, String) -> Unit
     ): Pair<List<MotionEvent>, BlueprintDebugSummary> = withContext(Dispatchers.Default) {
-        val cacheKey = "${referenceName}_${uri}"
+        val cacheKey = if (referenceName.contains(AuthoritativeReferenceBlueprint.REFERENCE_NAME, ignoreCase = true)) {
+            AuthoritativeReferenceBlueprint.REFERENCE_NAME
+        } else {
+            "${referenceName}_${uri}"
+        }
+
         getCachedEvents(cacheKey)?.let { cachedEvents ->
             val summary = getCachedSummary(cacheKey) ?: AuthoritativeReferenceBlueprint.debugSummary
+            activeReferenceKey = cacheKey
             onProgress(1.0f, "Loaded cached reference blueprint (${cachedEvents.size} events)")
             return@withContext Pair(cachedEvents, summary)
         }
@@ -76,11 +107,11 @@ object ReferenceMotionCache {
             try { retriever.release() } catch (e: Exception) {}
         }
 
-        onProgress(0.30f, "Detecting reference punch zooms and camera pans...")
-        delay(120) // Allow smooth UI transition
+        onProgress(0.35f, "Detecting reference punch zooms and camera pans...")
+        delay(80)
 
-        onProgress(0.60f, "Extracting continuous motion velocity curves...")
-        delay(120)
+        onProgress(0.65f, "Extracting continuous motion velocity curves...")
+        delay(80)
 
         // Synthesize dynamic motion events adapted to the reference video duration
         val events = mutableListOf<MotionEvent>()
@@ -101,7 +132,7 @@ object ReferenceMotionCache {
         }
 
         onProgress(0.90f, "Finalizing and caching motion blueprint...")
-        delay(80)
+        delay(50)
 
         val summary = BlueprintDebugSummary(
             referenceName = referenceName,
@@ -113,11 +144,12 @@ object ReferenceMotionCache {
             maxX = events.maxOf { it.startX.coerceAtLeast(it.peakX).coerceAtLeast(it.endX) },
             minY = events.minOf { it.startY.coerceAtMost(it.peakY).coerceAtMost(it.endY) },
             maxY = events.maxOf { it.startY.coerceAtLeast(it.peakY).coerceAtLeast(it.endY) },
-            primaryCurvesUsed = listOf("DYNAMIC_PUNCH", "CUSTOM_BEZIER", "CUBIC", "CINEMATIC_SLOW", "SMOOTHSTEP")
+            primaryCurvesUsed = listOf("DYNAMIC_PUNCH", "CUSTOM_BEZIER", "CUBIC", "CINEMATIC_SLOW", "SMOOTHSTEP", "EASE_IN_OUT")
         )
 
         blueprintCache[cacheKey] = events
         summaryCache[cacheKey] = summary
+        activeReferenceKey = cacheKey
 
         onProgress(1.0f, "Reference motion cached (${events.size} motion events)")
         Pair(events, summary)

@@ -76,7 +76,7 @@ object KeyframeEngine {
     }
 
     /**
-     * Updates keyframe values (scale, position, rotation, curve) for a clip.
+     * Updates keyframe values (scale, position, rotation, curve, or timestamp) for a clip.
      */
     fun updateKeyframe(
         clip: ClipSegment,
@@ -85,7 +85,8 @@ object KeyframeEngine {
         positionX: Float? = null,
         positionY: Float? = null,
         rotation: Float? = null,
-        easing: MotionCurve? = null
+        easing: MotionCurve? = null,
+        timestampMs: Long? = null
     ): ClipSegment {
         if (clip.startKeyframe.id == keyframeId) {
             val updated = clip.startKeyframe.copy(
@@ -109,9 +110,13 @@ object KeyframeEngine {
             return clip.copy(endKeyframe = updated, motionPreset = MotionPreset.CUSTOM)
         }
 
+        val minTs = (clip.startMs + 40L).coerceAtMost(clip.endMs)
+        val maxTs = (clip.endMs - 40L).coerceAtLeast(minTs)
+
         val updatedIntermediates = clip.intermediateKeyframes.map { kf ->
             if (kf.id == keyframeId) {
                 kf.copy(
+                    timestampMs = timestampMs?.coerceIn(minTs, maxTs) ?: kf.timestampMs,
                     scale = scale ?: kf.scale,
                     positionX = positionX ?: kf.positionX,
                     positionY = positionY ?: kf.positionY,
@@ -119,7 +124,7 @@ object KeyframeEngine {
                     easing = easing ?: kf.easing
                 )
             } else kf
-        }
+        }.sortedBy { it.timestampMs }
 
         return clip.copy(
             intermediateKeyframes = updatedIntermediates,

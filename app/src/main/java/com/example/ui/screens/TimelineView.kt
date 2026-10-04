@@ -462,7 +462,7 @@ fun TimelineView(
                                     )
                                 }
 
-                                // Keyframe Markers (Start diamond, End diamond)
+                                // Keyframe Markers (Start diamond, Intermediate diamonds, End diamond)
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -481,6 +481,30 @@ fun TimelineView(
                                             color = OmkarGold,
                                             fontWeight = FontWeight.Bold
                                         )
+                                    }
+
+                                    if (clip.intermediateKeyframes.isNotEmpty()) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            clip.intermediateKeyframes.take(3).forEach { kf ->
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Diamond,
+                                                        contentDescription = "Mid Keyframe",
+                                                        tint = OmkarPurple,
+                                                        modifier = Modifier.size(10.dp)
+                                                    )
+                                                    Text(
+                                                        text = "${(kf.scale * 100).toInt()}%",
+                                                        fontSize = 7.sp,
+                                                        color = OmkarPurple,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
 
                                     Row(verticalAlignment = Alignment.CenterVertically) {
